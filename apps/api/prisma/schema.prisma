@@ -1,0 +1,41 @@
+// Fisko — Prisma schema (Marco 1)
+// Models conforme seção 7 do CLAUDE.md.
+// Adição (Marco 1): User.tokenVersion habilita /auth/logout a invalidar refresh tokens
+// sem tabela extra — o refresh token embute a versão; logout incrementa.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String   @id @default(uuid())
+  email         String   @unique
+  passwordHash  String? // null se cadastro só via Google
+  name          String
+  ruc           String? // RUC paraguaio (sem dígito verificador)
+  rucDv         Int? // dígito verificador (dDVEmi)
+  googleId      String?  @unique
+  emailVerified Boolean  @default(false)
+  tokenVersion  Int      @default(0) // incrementado no logout para invalidar refresh tokens
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  resetTokens PasswordResetToken[]
+}
+
+model PasswordResetToken {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String // hash do token (nunca o token em claro)
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}

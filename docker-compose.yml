@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: fisko-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: fisko
+      POSTGRES_PASSWORD: fisko_dev
+      POSTGRES_DB: fisko
+    ports:
+      - "5432:5432"
+    volumes:
+      - fisko_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fisko -d fisko"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  fisko_pgdata:
