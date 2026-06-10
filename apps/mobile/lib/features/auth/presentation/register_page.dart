@@ -125,8 +125,9 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
                             : Text(l10n.register),
                       ),
                       const SizedBox(height: 12),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
+                      Wrap(
+                        alignment: WrapAlignment.center,
+                        crossAxisAlignment: WrapCrossAlignment.center,
                         children: [
                           Text(l10n.haveAccount),
                           TextButton(

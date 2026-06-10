@@ -111,8 +111,9 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                         label: Text(l10n.continueWithGoogle),
                       ),
                       const SizedBox(height: 16),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
+                      Wrap(
+                        alignment: WrapAlignment.center,
+                        crossAxisAlignment: WrapCrossAlignment.center,
                         children: [
                           Text(l10n.noAccount),
                           TextButton(

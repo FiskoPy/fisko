@@ -36,6 +36,7 @@ apps/mobile/android/local.properties
 apps/mobile/android/key.properties
 *.g.dart
 *.freezed.dart
+apps/mobile/lib/l10n/generated/
 
 # IDE / OS
 .vscode/
