@@ -15,11 +15,14 @@ describe('calcRucDv (módulo 11, base 11)', () => {
     expect(calcRucDv('80012345')).toBe(calcRucDv('8 0 0 1 2 3 4 5'));
   });
 
-  it('matches the reference algorithm output for known inputs', () => {
-    // Snapshot of the reference algorithm (CLAUDE.md §12). These lock the
-    // current behavior; replace with DNIT-verified vectors before production.
-    expect(calcRucDv('80012345')).toBe(calcRucDv('80012345'));
-    expect(typeof calcRucDv('1')).toBe('number');
+  // Real vectors extracted from a signed SIFEN DTE (electronic invoice).
+  // These are authoritative: the check digits come from the official document.
+  it.each([
+    ['80054993', 7], // VIELA S.A. (emisor)
+    ['4904579', 2], //  receptor (persona física)
+    ['80013884', 8], // BANCARD S.A.
+  ])('real DNIT vector: RUC %s → dv %i', (ruc, dv) => {
+    expect(calcRucDv(ruc as string)).toBe(dv);
   });
 });
 
@@ -28,6 +31,12 @@ describe('isValidRucDv', () => {
     const ruc = '80012345';
     const dv = calcRucDv(ruc);
     expect(isValidRucDv(ruc, dv)).toBe(true);
+  });
+
+  it('accepts real DNIT RUC/dv pairs', () => {
+    expect(isValidRucDv('80054993', 7)).toBe(true);
+    expect(isValidRucDv('4904579', 2)).toBe(true);
+    expect(isValidRucDv('80013884', 8)).toBe(true);
   });
 
   it('rejects a wrong check digit', () => {
@@ -48,6 +57,3 @@ describe('normalizeRuc', () => {
     expect(normalizeRuc('80.012.345')).toBe('80012345');
   });
 });
-
-// TODO(produção): adicionar vetores de RUCs reais fornecidos pelo CONTRATANTE
-// e validados contra a especificação oficial da DNIT.

@@ -25,6 +25,13 @@ void main() {
       expect(RucValidator.isValid('', 0), isFalse);
     });
 
-    // TODO(produção): adicionar vetores de RUCs reais validados contra a DNIT.
+    test('real DNIT vectors from a signed SIFEN DTE', () {
+      // Authoritative RUC/dv pairs taken from an official electronic invoice.
+      const vectors = {'80054993': 7, '4904579': 2, '80013884': 8};
+      vectors.forEach((ruc, dv) {
+        expect(RucValidator.calcDv(ruc), dv, reason: 'RUC $ruc');
+        expect(RucValidator.isValid(ruc, dv), isTrue, reason: 'RUC $ruc');
+      });
+    });
   });
 }
