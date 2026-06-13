@@ -3,7 +3,7 @@ import { z } from 'zod';
 
 /**
  * Environment validation. Fails fast on boot if a required secret is missing.
- * Mirrors the keys documented in CLAUDE.md section 6 / .env.example.
+ * Mirrors the keys documented in ESCOPO.md section 6 / .env.example.
  */
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),

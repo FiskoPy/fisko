@@ -11,7 +11,7 @@ export const notFoundHandler: RequestHandler = (_req, res) => {
 };
 
 /**
- * Central error handler. Renders the standard envelope required by CLAUDE.md:
+ * Central error handler. Renders the standard envelope required by ESCOPO.md:
  *   { error: { code, message, details? } }
  */
 // eslint-disable-next-line @typescript-eslint/no-unused-vars

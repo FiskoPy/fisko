@@ -1,7 +1,7 @@
 /**
  * Paraguayan RUC check digit (dDVEmi).
  *
- * Reference algorithm from CLAUDE.md section 12 (módulo 11, base 11).
+ * Reference algorithm from ESCOPO.md section 12 (módulo 11, base 11).
  * IMPORTANT: validate against real RUCs and the official DNIT spec before
  * relying on this in production.
  */

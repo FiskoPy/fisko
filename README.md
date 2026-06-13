@@ -4,7 +4,7 @@ App móvel de gestão fiscal para contribuintes paraguaios com RUC ativo.
 Monorepo com backend Node/TypeScript e app Flutter.
 
 > **Fase ativa:** Marco 1 — Setup + Autenticação + Estrutura base.
-> Ver [`CLAUDE.md`](./CLAUDE.md) para a especificação e regras de escopo.
+> Ver [`ESCOPO.md`](./ESCOPO.md) para a especificação e regras de escopo.
 
 ## Estrutura
 
@@ -15,7 +15,7 @@ fisko/
 │   └── mobile/     # app Flutter (feature-first)
 ├── docs/           # specs das fases futuras (quando liberadas)
 ├── docker-compose.yml   # Postgres 16 para desenvolvimento
-└── CLAUDE.md
+└── ESCOPO.md
 ```
 
 ## Pré-requisitos

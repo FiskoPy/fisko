@@ -1,6 +1,6 @@
-# CLAUDE.md — Projeto Fisko
+# ESCOPO.md — Projeto Fisko
 
-> **O que é este arquivo:** instruções persistentes para o Claude Code neste repositório.
+> **O que é este arquivo:** instruções persistentes de escopo do projeto neste repositório.
 > **Fase ativa:** **MARCO 1 — Setup + Autenticação + Estrutura base.**
 > Leia a seção **"REGRA DE ESCOPO / FASEAMENTO"** antes de qualquer coisa.
 
@@ -51,7 +51,7 @@ O projeto é entregue em 3 marcos pagos. **Só implemente o que está na seção
 
 ```
 fisko/
-├── CLAUDE.md
+├── ESCOPO.md
 ├── README.md
 ├── .gitignore
 ├── apps/
@@ -269,10 +269,9 @@ export function calcRucDv(ruc: string, base = 11): number {
 
 ---
 
-## Como usar com o Claude Code
+## Como usar este documento
 
-- Coloque este arquivo como **`CLAUDE.md` na raiz do repositório**. O Claude Code o lê automaticamente no início de cada sessão (subindo a árvore de diretórios até a raiz).
+- Mantenha este arquivo (`ESCOPO.md`) na raiz do repositório como referência de escopo.
 - Mantenha segredos em `.env` (no `.gitignore`); use `.env.example` para a estrutura.
-- Preferências pessoais suas (que não vão pro cliente) podem ir em `CLAUDE.local.md` (também no `.gitignore`).
+- Preferências pessoais (que não vão pro cliente) podem ir em `ESCOPO.local.md` (também no `.gitignore`).
 - Ao concluir e receber o Marco 1, **atualize a "Fase ativa"** no topo para o Marco 2 e mova o detalhamento dele para `docs/` se preferir manter este arquivo enxuto.
-- Documentação oficial: https://docs.claude.com/en/docs/claude-code/overview

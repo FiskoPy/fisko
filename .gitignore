@@ -11,7 +11,7 @@ npm-debug.log*
 .env
 .env.*
 !.env.example
-CLAUDE.local.md
+ESCOPO.local.md
 
 # Prisma
 apps/api/prisma/*.db

@@ -1,5 +1,5 @@
 // Fisko — Prisma schema (Marco 1)
-// Models conforme seção 7 do CLAUDE.md.
+// Models conforme seção 7 do ESCOPO.md.
 // Adição (Marco 1): User.tokenVersion habilita /auth/logout a invalidar refresh tokens
 // sem tabela extra — o refresh token embute a versão; logout incrementa.
 
