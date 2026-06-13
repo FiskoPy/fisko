@@ -1,0 +1,43 @@
+# Render Blueprint — Fisko API (homologação)
+# Deploy: Render Dashboard → New → Blueprint → conectar o repo FiskoPy/fisko → Apply.
+# Render lê este arquivo e provisiona o web service + Postgres + variáveis.
+
+databases:
+  - name: fisko-db
+    databaseName: fisko
+    user: fisko
+    plan: free # Postgres grátis (expira ~30 dias; ok p/ homologação)
+
+services:
+  - type: web
+    name: fisko-api
+    runtime: node
+    plan: free # web grátis (hiberna após 15 min ocioso; 1º request acorda)
+    rootDir: apps/api
+    buildCommand: npm install && npm run build
+    startCommand: npx prisma migrate deploy && npm start
+    healthCheckPath: /api/v1/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: fisko-db
+          property: connectionString
+      - key: JWT_ACCESS_SECRET
+        generateValue: true # Render gera um segredo forte
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+      - key: JWT_ACCESS_TTL
+        value: 15m
+      - key: JWT_REFRESH_TTL
+        value: 30d
+      - key: GOOGLE_CLIENT_ID
+        value: 686268310274-tet8th5uu2qdmav1afekd8a3csojtkgg.apps.googleusercontent.com
+      # APP_URL só afeta o link do e-mail de recuperação. Após o 1º deploy,
+      # copie a URL pública do serviço (https://fisko-api.onrender.com) e cole aqui.
+      - key: APP_URL
+        sync: false
+      # SMTP em branco => fallback Ethereal (homologação). Para e-mail real,
+      # preencha SMTP_HOST/PORT/USER/PASS no painel depois.
