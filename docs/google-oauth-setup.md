@@ -44,11 +44,16 @@ Google do projeto (ex.: a conta Fisko no Google Cloud). Ao final, o botão
 - (O ID deste client não é referenciado diretamente no código, mas precisa existir
   para o Google Sign-In funcionar no Android.)
 
-### c) iOS
+### c) iOS  (pode PULAR por agora — build iOS exige Mac)
 - Application type: **iOS**.
 - Bundle ID: `com.fisko.app`.
-- Depois, no `ios/Runner/Info.plist`, adicionar o **iOS URL scheme** (o "reversed
-  client ID" que o Google mostra, formato `com.googleusercontent.apps.XXXX`).
+- **"ID de App Store" → deixar EM BRANCO** (só existe após publicar; opcional).
+- **"ID de equipo / Team ID" → deixar EM BRANCO** (é o Team ID da conta Apple
+  Developer; opcional). NÃO colocar caminho de arquivo nesses campos.
+- Só **depois** de criar, e **apenas quando for buildar no iOS** (num Mac), pega-se
+  o **iOS URL scheme** (o "reversed client ID", formato
+  `com.googleusercontent.apps.XXXX`) e cola-se **no arquivo** `ios/Runner/Info.plist`
+  como um `CFBundleURLSchemes`. Isso é um passo de **código**, não um campo do formulário.
 
 ## 3. Ligar no Fisko
 
