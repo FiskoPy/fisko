@@ -1,4 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Required so the release build can reach the API over the network. -->
+    <uses-permission android:name="android.permission.INTERNET"/>
     <application
         android:label="Fisko"
         android:name="${applicationName}"
