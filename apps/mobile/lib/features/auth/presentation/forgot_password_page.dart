@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
+import '../../../core/config/constants.dart';
 import '../../../l10n/generated/app_localizations.dart';
 import '../../../shared/widgets/auth_message_listener.dart';
 import '../application/auth_controller.dart';
@@ -61,6 +63,11 @@ class _ForgotPasswordPageState extends ConsumerState<ForgotPasswordPage> {
                                 child: CircularProgressIndicator(strokeWidth: 2),
                               )
                             : Text(l10n.sendResetLink),
+                      ),
+                      const SizedBox(height: 8),
+                      TextButton(
+                        onPressed: () => context.push(AppRoutes.reset),
+                        child: const Text('Ya tengo un código'),
                       ),
                     ],
                   ),

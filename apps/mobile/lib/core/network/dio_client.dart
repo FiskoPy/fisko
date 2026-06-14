@@ -13,8 +13,9 @@ class DioClient {
     dio = Dio(
       BaseOptions(
         baseUrl: Env.apiBaseUrl,
-        connectTimeout: const Duration(seconds: 15),
-        receiveTimeout: const Duration(seconds: 15),
+        // Generous timeouts: free hosting (Render) can cold-start ~50s after idle.
+        connectTimeout: const Duration(seconds: 60),
+        receiveTimeout: const Duration(seconds: 60),
         contentType: 'application/json',
       ),
     );

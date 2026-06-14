@@ -65,21 +65,27 @@ export async function sendMail(input: SendMailInput): Promise<void> {
 }
 
 /**
- * Sends the password-reset email. The link points the mobile app / web to the
- * reset screen carrying the raw token (never stored in clear on the server).
+ * Sends the password-reset email. Presents the raw token as a code the user
+ * pastes into the app's "Nueva contraseña" screen (the token is only stored
+ * hashed on the server). No web reset page exists yet, so we don't link out.
  */
 export async function sendPasswordResetEmail(to: string, token: string): Promise<void> {
-  const resetUrl = `${env.APP_URL}/reset-password?token=${encodeURIComponent(token)}`;
   await sendMail({
     to,
-    subject: 'Fisko — Restablecer contraseña',
+    subject: 'Fisko — Código para restablecer tu contraseña',
     text:
       `Recibimos una solicitud para restablecer tu contraseña.\n\n` +
-      `Usá el siguiente enlace (válido por tiempo limitado):\n${resetUrl}\n\n` +
+      `Tu código de recuperación es:\n\n${token}\n\n` +
+      `Cómo usarlo: abrí la app Fisko → "¿Olvidaste tu contraseña?" → "Ya tengo un código", ` +
+      `pegá este código y definí tu nueva contraseña. El código vence en 1 hora.\n\n` +
       `Si no fuiste vos, podés ignorar este mensaje.`,
     html:
       `<p>Recibimos una solicitud para restablecer tu contraseña.</p>` +
-      `<p><a href="${resetUrl}">Restablecer contraseña</a> (válido por tiempo limitado).</p>` +
+      `<p>Tu código de recuperación es:</p>` +
+      `<p style="font-family:monospace;font-size:14px;word-break:break-all;` +
+      `background:#f2f2f2;padding:12px;border-radius:8px">${token}</p>` +
+      `<p>Abrí la app Fisko → <b>"¿Olvidaste tu contraseña?"</b> → <b>"Ya tengo un código"</b>, ` +
+      `pegá este código y definí tu nueva contraseña. El código vence en 1 hora.</p>` +
       `<p>Si no fuiste vos, podés ignorar este mensaje.</p>`,
   });
 }
