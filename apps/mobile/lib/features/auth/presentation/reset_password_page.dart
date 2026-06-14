@@ -63,7 +63,7 @@ class _ResetPasswordPageState extends ConsumerState<ResetPasswordPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      PlainTextField(controller: _token, label: 'Token'),
+                      PlainTextField(controller: _token, label: 'Código de recuperación'),
                       const SizedBox(height: 16),
                       PasswordField(controller: _password, label: l10n.newPassword),
                       const SizedBox(height: 24),
