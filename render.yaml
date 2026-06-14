@@ -14,9 +14,10 @@ services:
     runtime: docker
     plan: free
     region: oregon
-    # Usa o Dockerfile do monorepo com contexto = apps/api (já validado localmente).
-    dockerfilePath: ./apps/api/Dockerfile
-    dockerContext: ./apps/api
+    # Monorepo: rootDir escopa tudo para apps/api; Dockerfile/contexto ficam relativos a ele.
+    rootDir: apps/api
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
     healthCheckPath: /api/v1/health
     autoDeploy: true
     envVars:
