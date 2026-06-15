@@ -10,6 +10,10 @@ import { apiRouter } from './routes';
 export function createApp(): Express {
   const app = express();
 
+  // Behind a reverse proxy (Render/Railway/etc.): trust the first proxy hop so
+  // express-rate-limit and req.ip use the real client IP (X-Forwarded-For).
+  app.set('trust proxy', 1);
+
   app.disable('x-powered-by');
   app.use(helmet());
   app.use(cors());
