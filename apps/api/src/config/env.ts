@@ -25,6 +25,10 @@ const envSchema = z.object({
   SMTP_USER: z.string().optional(),
   SMTP_PASS: z.string().optional(),
   SMTP_FROM: z.string().default('Fisko <no-reply@fisko.app>'),
+
+  // Preferred for cloud hosting: Brevo HTTP API (port 443) — SMTP from datacenter
+  // IPs is often blocked/timed-out. When set, the mailer sends via the Brevo API.
+  BREVO_API_KEY: z.string().optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);

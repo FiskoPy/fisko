@@ -46,7 +46,47 @@ export interface SendMailInput {
   html?: string;
 }
 
+/** Parses "Fisko <fiskopy@gmail.com>" into { name, email }. */
+function parseSender(from: string): { name: string; email: string } {
+  const m = from.match(/^\s*(.*?)\s*<([^>]+)>\s*$/);
+  if (m && m[2]) return { name: m[1] || 'Fisko', email: m[2] };
+  return { name: 'Fisko', email: from.trim() };
+}
+
+/**
+ * Sends via the Brevo HTTP API (port 443). Preferred on cloud hosts where SMTP
+ * is blocked/timed-out from datacenter IPs.
+ */
+async function sendViaBrevoApi(input: SendMailInput): Promise<void> {
+  const res = await fetch('https://api.brevo.com/v3/smtp/email', {
+    method: 'POST',
+    headers: {
+      'api-key': env.BREVO_API_KEY as string,
+      'content-type': 'application/json',
+      accept: 'application/json',
+    },
+    body: JSON.stringify({
+      sender: parseSender(env.SMTP_FROM),
+      to: [{ email: input.to }],
+      subject: input.subject,
+      textContent: input.text,
+      htmlContent: input.html ?? input.text,
+    }),
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`Brevo API ${res.status}: ${body.slice(0, 200)}`);
+  }
+  const data = (await res.json().catch(() => ({}))) as { messageId?: string };
+  logger.info({ to: input.to, messageId: data.messageId }, 'Email sent (Brevo API)');
+}
+
 export async function sendMail(input: SendMailInput): Promise<void> {
+  if (env.BREVO_API_KEY) {
+    await sendViaBrevoApi(input);
+    return;
+  }
+
   const transporter = await getTransporter();
   const info = await transporter.sendMail({
     from: env.SMTP_FROM,
