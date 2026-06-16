@@ -29,6 +29,10 @@ const envSchema = z.object({
   // Preferred for cloud hosting: Brevo HTTP API (port 443) — SMTP from datacenter
   // IPs is often blocked/timed-out. When set, the mailer sends via the Brevo API.
   BREVO_API_KEY: z.string().optional(),
+
+  // Passphrase used to encrypt e-mail app passwords / tokens at rest (2C email
+  // capture). Required only to use the e-mail capture feature; >=16 chars.
+  EMAIL_CRYPTO_KEY: z.string().min(16).optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);

@@ -11,6 +11,7 @@ class AppRoutes {
   static const String captura = '/captura';
   static const String relatorios = '/relatorios';
   static const String perfil = '/perfil';
+  static const String conectarEmail = 'email'; // nested under /perfil
 }
 
 class StorageKeys {

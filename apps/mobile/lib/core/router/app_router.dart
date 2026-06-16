@@ -9,6 +9,7 @@ import '../../features/auth/presentation/login_page.dart';
 import '../../features/auth/presentation/register_page.dart';
 import '../../features/auth/presentation/reset_password_page.dart';
 import '../../features/dashboard/dashboard_page.dart';
+import '../../features/email/presentation/conectar_email_page.dart';
 import '../../features/invoices/presentation/captura_page.dart';
 import '../../features/invoices/presentation/invoice_detail_page.dart';
 import '../../features/perfil/perfil_page.dart';
@@ -83,7 +84,16 @@ final goRouterProvider = Provider<GoRouter>((ref) {
             ],
           ),
           GoRoute(path: AppRoutes.relatorios, builder: (_, __) => const RelatoriosPage()),
-          GoRoute(path: AppRoutes.perfil, builder: (_, __) => const PerfilPage()),
+          GoRoute(
+            path: AppRoutes.perfil,
+            builder: (_, __) => const PerfilPage(),
+            routes: [
+              GoRoute(
+                path: AppRoutes.conectarEmail,
+                builder: (_, __) => const ConectarEmailPage(),
+              ),
+            ],
+          ),
         ],
       ),
     ],

@@ -26,8 +26,31 @@ model User {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
-  resetTokens PasswordResetToken[]
-  invoices    Invoice[]
+  resetTokens      PasswordResetToken[]
+  invoices         Invoice[]
+  emailConnections EmailConnection[]
+}
+
+// Caixa de e-mail conectada para captura automática de DTE (XML em anexos).
+// 2C homologação: IMAP com "app password" (Gmail). Produção/Outlook: OAuth.
+model EmailConnection {
+  id           String    @id @default(uuid())
+  userId       String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider     String // gmail | outlook | imap
+  email        String
+  host         String
+  port         Int       @default(993)
+  secure       Boolean   @default(true)
+  authType     String    @default("app_password") // app_password | oauth (futuro)
+  secretEnc    String // senha de app / token cifrado (AES-256-GCM)
+  lastSyncAt   DateTime?
+  lastSyncInfo String? // resumo (JSON) do último sync
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@unique([userId, email])
+  @@index([userId])
 }
 
 // DTE SIFEN (Documento Tributário Electrónico) importado pelo usuário.

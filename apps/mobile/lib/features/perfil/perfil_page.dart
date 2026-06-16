@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
+import '../../core/config/constants.dart';
 import '../../l10n/generated/app_localizations.dart';
 import '../auth/application/auth_controller.dart';
 
@@ -33,6 +35,14 @@ class PerfilPage extends ConsumerWidget {
               ),
             const Divider(),
           ],
+          ListTile(
+            leading: const Icon(Icons.mark_email_read_outlined),
+            title: const Text('Conectar correo'),
+            subtitle: const Text('Importar facturas automáticamente'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => context.go('${AppRoutes.perfil}/${AppRoutes.conectarEmail}'),
+          ),
+          const Divider(),
           ListTile(
             leading: const Icon(Icons.logout),
             title: Text(l10n.logout),

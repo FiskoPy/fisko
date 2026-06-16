@@ -15,6 +15,7 @@ export default defineConfig({
         process.env.JWT_REFRESH_SECRET ?? 'test_refresh_secret_value_0123456789',
       JWT_ACCESS_TTL: '15m',
       JWT_REFRESH_TTL: '30d',
+      EMAIL_CRYPTO_KEY: process.env.EMAIL_CRYPTO_KEY ?? 'test-email-crypto-key-0123456789',
     },
     // Integration tests share a DB — run serially to avoid cross-test races.
     fileParallelism: false,
