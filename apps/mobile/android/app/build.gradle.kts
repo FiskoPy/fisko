@@ -6,7 +6,8 @@ plugins {
 
 android {
     namespace = "com.fisko.fisko"
-    compileSdk = flutter.compileSdkVersion
+    // Newer plugins (file_picker, google_sign_in, etc.) require a recent compileSdk.
+    compileSdk = 36
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
