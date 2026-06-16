@@ -3,8 +3,7 @@
 App móvel de gestão fiscal para contribuintes paraguaios com RUC ativo.
 Monorepo com backend Node/TypeScript e app Flutter.
 
-> **Fase ativa:** Marco 1 — Setup + Autenticação + Estrutura base.
-> Ver [`ESCOPO.md`](./ESCOPO.md) para a especificação e regras de escopo.
+> **Fase ativa:** Marco 2 — Núcleo funcional (Marco 1 entregue). Ver [`ESCOPO.md`](./ESCOPO.md).
 
 ## Estrutura
 

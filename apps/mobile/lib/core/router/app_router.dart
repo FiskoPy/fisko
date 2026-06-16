@@ -8,8 +8,9 @@ import '../../features/auth/presentation/forgot_password_page.dart';
 import '../../features/auth/presentation/login_page.dart';
 import '../../features/auth/presentation/register_page.dart';
 import '../../features/auth/presentation/reset_password_page.dart';
-import '../../features/captura/captura_page.dart';
 import '../../features/dashboard/dashboard_page.dart';
+import '../../features/invoices/presentation/captura_page.dart';
+import '../../features/invoices/presentation/invoice_detail_page.dart';
 import '../../features/perfil/perfil_page.dart';
 import '../../features/relatorios/relatorios_page.dart';
 import '../../features/shell/app_shell.dart';
@@ -71,7 +72,16 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         builder: (_, __, child) => AppShell(child: child),
         routes: [
           GoRoute(path: AppRoutes.dashboard, builder: (_, __) => const DashboardPage()),
-          GoRoute(path: AppRoutes.captura, builder: (_, __) => const CapturaPage()),
+          GoRoute(
+            path: AppRoutes.captura,
+            builder: (_, __) => const CapturaPage(),
+            routes: [
+              GoRoute(
+                path: ':id',
+                builder: (_, state) => InvoiceDetailPage(id: state.pathParameters['id']!),
+              ),
+            ],
+          ),
           GoRoute(path: AppRoutes.relatorios, builder: (_, __) => const RelatoriosPage()),
           GoRoute(path: AppRoutes.perfil, builder: (_, __) => const PerfilPage()),
         ],

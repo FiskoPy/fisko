@@ -32,6 +32,9 @@ dependencies:
   # Google sign-in
   google_sign_in: ^6.2.2
 
+  # Importar XML (DTE) do dispositivo
+  file_picker: ^8.1.6
+
   intl: ^0.20.2
 
 dev_dependencies:

@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { authRouter } from './modules/auth/auth.routes';
+import { invoicesRouter } from './modules/invoices/invoices.routes';
 
 /** Aggregates all /api/v1 routes. */
 export const apiRouter = Router();
@@ -9,3 +10,4 @@ apiRouter.get('/health', (_req, res) => {
 });
 
 apiRouter.use('/auth', authRouter);
+apiRouter.use('/invoices', invoicesRouter);

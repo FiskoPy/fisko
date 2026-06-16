@@ -1,7 +1,7 @@
-// Fisko — Prisma schema (Marco 1)
-// Models conforme seção 7 do ESCOPO.md.
-// Adição (Marco 1): User.tokenVersion habilita /auth/logout a invalidar refresh tokens
-// sem tabela extra — o refresh token embute a versão; logout incrementa.
+// Fisko — Prisma schema.
+// Marco 1: User + PasswordResetToken (auth).
+// Marco 2 (2A): Invoice + InvoiceItem (DTE SIFEN). A quebra de IVA 5%/10% fica
+// como colunas no Invoice (só duas alíquotas) — mais simples para o dashboard.
 
 generator client {
   provider      = "prisma-client-js"
@@ -27,6 +27,59 @@ model User {
   updatedAt     DateTime @updatedAt
 
   resetTokens PasswordResetToken[]
+  invoices    Invoice[]
+}
+
+// DTE SIFEN (Documento Tributário Electrónico) importado pelo usuário.
+model Invoice {
+  id             String   @id @default(uuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  cdc            String // Código de Control (44 dígitos) — dedup por usuário (@@unique abaixo)
+  tipoDoc        Int // iTiDE: 1=Factura, 4=Autofactura, 5=NC, 6=ND, 7=NR
+  tipoDocDesc    String? // dDesTiDE
+  emisorRuc      String
+  emisorDv       Int?
+  emisorNombre   String
+  receptorRuc    String?
+  receptorDv     Int?
+  receptorNombre String?
+  fechaEmision   DateTime
+  moneda         String   @default("PYG")
+  // Totais (gTotSub)
+  totalOpe   Decimal @db.Decimal(18, 4) // dTotGralOpe
+  totalIva   Decimal @db.Decimal(18, 4) // dTotIVA
+  iva5       Decimal @db.Decimal(18, 4) // dIVA5
+  iva10      Decimal @db.Decimal(18, 4) // dIVA10
+  baseGrav5  Decimal @db.Decimal(18, 4) // dBaseGrav5
+  baseGrav10 Decimal @db.Decimal(18, 4) // dBaseGrav10
+  // Notas de crédito/débito referenciam o CDC original
+  originalCdc String?
+  source      String   @default("manual") // manual | email | ocr
+  xmlRaw      String?
+  createdAt   DateTime @default(now())
+
+  items InvoiceItem[]
+
+  @@unique([userId, cdc])
+  @@index([userId])
+  @@index([userId, fechaEmision])
+}
+
+model InvoiceItem {
+  id          String  @id @default(uuid())
+  invoiceId   String
+  invoice     Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  codigo      String? // dCodInt
+  descripcion String // dDesProSer
+  cantidad    Decimal @db.Decimal(18, 4) // dCantProSer
+  precioUnit  Decimal @db.Decimal(18, 4) // dPUniProSer
+  total       Decimal @db.Decimal(18, 4) // dTotOpeItem
+  ivaRate     Int // dTasaIVA (0 exento, 5, 10)
+  ivaBase     Decimal @db.Decimal(18, 4) // dBasGravIVA
+  ivaMonto    Decimal @db.Decimal(18, 4) // dLiqIVAItem
+
+  @@index([invoiceId])
 }
 
 model PasswordResetToken {

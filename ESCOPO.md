@@ -1,7 +1,8 @@
 # ESCOPO.md — Projeto Fisko
 
 > **O que é este arquivo:** instruções persistentes de escopo do projeto neste repositório.
-> **Fase ativa:** **MARCO 1 — Setup + Autenticação + Estrutura base.**
+> **Fase ativa:** **MARCO 2 — Núcleo funcional** (Marco 1 entregue/aceito). Em execução faseada:
+> 2A SIFEN+faturas → 2B dashboard/relatórios → 2C e-mail → 2D OCR → 2E IA → 2F Pagopar → 2G WhatsApp.
 > Leia a seção **"REGRA DE ESCOPO / FASEAMENTO"** antes de qualquer coisa.
 
 ---
