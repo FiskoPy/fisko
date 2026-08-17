@@ -2,6 +2,7 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/errors/error_message.dart';
 import '../../core/format.dart';
 import '../reports/application/summary_controller.dart';
 import '../reports/data/models/summary_models.dart';
@@ -20,7 +21,13 @@ class DashboardPage extends ConsumerWidget {
         child: async.when(
           loading: () => const Center(child: CircularProgressIndicator()),
           error: (e, _) => ListView(
-            children: [const SizedBox(height: 160), Center(child: Text('Error: $e'))],
+            children: [
+              const SizedBox(height: 160),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: Text(friendlyError(e), textAlign: TextAlign.center),
+              ),
+            ],
           ),
           data: (s) => s.count == 0 ? _empty() : _Dashboard(summary: s),
         ),

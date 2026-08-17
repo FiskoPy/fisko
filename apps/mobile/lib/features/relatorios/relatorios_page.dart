@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
+import '../../core/errors/error_message.dart';
 import '../reports/data/reports_api.dart';
 
 class RelatoriosPage extends ConsumerStatefulWidget {
@@ -29,7 +30,7 @@ class _RelatoriosPageState extends ConsumerState<RelatoriosPage> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('No se pudo generar el reporte: $e')),
+          SnackBar(content: Text('No se pudo generar el reporte. ${friendlyError(e)}')),
         );
       }
     } finally {

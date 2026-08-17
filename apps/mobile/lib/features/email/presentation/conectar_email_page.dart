@@ -1,8 +1,10 @@
-import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/errors/error_message.dart';
 import '../../../core/format.dart';
+import '../../invoices/application/invoices_controller.dart';
+import '../../reports/application/summary_controller.dart';
 import '../data/email_api.dart';
 
 /// "Conectar correo" — connect a mailbox (Gmail app password) and pull SIFEN
@@ -27,7 +29,13 @@ class ConectarEmailPage extends ConsumerWidget {
         child: async.when(
           loading: () => const Center(child: CircularProgressIndicator()),
           error: (e, _) => ListView(
-            children: [const SizedBox(height: 160), Center(child: Text('Error: $e'))],
+            children: [
+              const SizedBox(height: 160),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: Text(friendlyError(e), textAlign: TextAlign.center),
+              ),
+            ],
           ),
           data: (conns) => conns.isEmpty ? _empty(context) : _list(context, ref, conns),
         ),
@@ -103,6 +111,11 @@ class _ConnectionTileState extends ConsumerState<_ConnectionTile> {
               : 'Sin facturas nuevas (${res.duplicated} ya estaban importadas).';
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
       ref.invalidate(emailConnectionsProvider);
+      if (res.imported > 0) {
+        // Newly captured invoices must show up on Inicio/Captura right away.
+        ref.invalidate(fiscalSummaryProvider);
+        await ref.read(invoicesControllerProvider.notifier).load();
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
@@ -195,15 +208,31 @@ class _ConnectFormState extends ConsumerState<_ConnectForm> {
   final _formKey = GlobalKey<FormState>();
   final _email = TextEditingController();
   final _password = TextEditingController();
+  final _host = TextEditingController();
+  final _port = TextEditingController(text: '993');
   String _provider = 'gmail';
   bool _busy = false;
   String? _error;
+
+  bool get _isCustom => _provider == 'imap';
 
   @override
   void dispose() {
     _email.dispose();
     _password.dispose();
+    _host.dispose();
+    _port.dispose();
     super.dispose();
+  }
+
+  /// Most corporate mailboxes answer IMAP on `mail.<domain>`; pre-filling it
+  /// saves the user from hunting for the setting (they can still edit it).
+  void _suggestHost() {
+    if (!_isCustom || _host.text.trim().isNotEmpty) return;
+    final at = _email.text.trim().split('@');
+    if (at.length == 2 && at[1].contains('.')) {
+      _host.text = 'mail.${at[1]}';
+    }
   }
 
   Future<void> _submit() async {
@@ -217,6 +246,8 @@ class _ConnectFormState extends ConsumerState<_ConnectForm> {
             provider: _provider,
             email: _email.text.trim(),
             appPassword: _password.text.trim(),
+            host: _isCustom ? _host.text.trim() : null,
+            port: _isCustom ? int.tryParse(_port.text.trim()) ?? 993 : null,
           );
       widget.onConnected();
     } catch (e) {
@@ -244,8 +275,15 @@ class _ConnectFormState extends ConsumerState<_ConnectForm> {
               items: const [
                 DropdownMenuItem(value: 'gmail', child: Text('Gmail')),
                 DropdownMenuItem(value: 'outlook', child: Text('Outlook')),
+                DropdownMenuItem(
+                  value: 'imap',
+                  child: Text('Otro / correo corporativo'),
+                ),
               ],
-              onChanged: (v) => setState(() => _provider = v ?? 'gmail'),
+              onChanged: (v) => setState(() {
+                _provider = v ?? 'gmail';
+                _suggestHost();
+              }),
             ),
             const SizedBox(height: 12),
             TextFormField(
@@ -253,20 +291,52 @@ class _ConnectFormState extends ConsumerState<_ConnectForm> {
               keyboardType: TextInputType.emailAddress,
               autocorrect: false,
               decoration: const InputDecoration(labelText: 'Correo electrónico'),
+              onChanged: (_) => _suggestHost(),
               validator: (v) =>
                   (v == null || !v.contains('@')) ? 'Ingresá un correo válido' : null,
             ),
+            if (_isCustom) ...[
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _host,
+                autocorrect: false,
+                keyboardType: TextInputType.url,
+                decoration: const InputDecoration(
+                  labelText: 'Servidor IMAP',
+                  hintText: 'ej. mail.tuempresa.com.py',
+                  helperText: 'Lo provee quien te da el correo (tu hosting o proveedor de dominio).',
+                  helperMaxLines: 3,
+                ),
+                validator: (v) => (v == null || v.trim().length < 4)
+                    ? 'Ingresá el servidor IMAP'
+                    : null,
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _port,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: 'Puerto',
+                  helperText: 'Casi siempre 993 (IMAP con SSL).',
+                ),
+                validator: (v) => (int.tryParse((v ?? '').trim()) == null)
+                    ? 'Ingresá un puerto válido'
+                    : null,
+              ),
+            ],
             const SizedBox(height: 12),
             TextFormField(
               controller: _password,
               obscureText: true,
-              decoration: const InputDecoration(
-                labelText: 'Contraseña de aplicación',
-                helperText: 'Gmail: creá una "contraseña de aplicación" (requiere verificación en 2 pasos).',
+              decoration: InputDecoration(
+                labelText: _isCustom ? 'Contraseña del correo' : 'Contraseña de aplicación',
+                helperText: _isCustom
+                    ? 'La contraseña de esa casilla. Se guarda cifrada y sólo se usa para leer los adjuntos.'
+                    : 'Gmail: creá una "contraseña de aplicación" (requiere verificación en 2 pasos).',
                 helperMaxLines: 3,
               ),
               validator: (v) =>
-                  (v == null || v.trim().length < 4) ? 'Ingresá la contraseña de aplicación' : null,
+                  (v == null || v.trim().length < 4) ? 'Ingresá la contraseña' : null,
             ),
             if (_provider == 'outlook')
               const Padding(
@@ -274,6 +344,15 @@ class _ConnectFormState extends ConsumerState<_ConnectForm> {
                 child: Text(
                   'Nota: las cuentas personales de Outlook pueden requerir conexión por OAuth '
                   '(próximamente). Si tu casilla permite IMAP con contraseña de aplicación, funcionará.',
+                  style: TextStyle(fontSize: 12),
+                ),
+              ),
+            if (_isCustom)
+              const Padding(
+                padding: EdgeInsets.only(top: 8),
+                child: Text(
+                  'Usá esta opción si tu correo es de tu propio dominio '
+                  '(ej. nombre@tuempresa.com.py) y no de Gmail ni Outlook.',
                   style: TextStyle(fontSize: 12),
                 ),
               ),
@@ -299,14 +378,4 @@ class _ConnectFormState extends ConsumerState<_ConnectForm> {
   }
 }
 
-String _msg(Object e) {
-  if (e is DioException) {
-    final data = e.response?.data;
-    if (data is Map && data['error'] is Map && data['error']['message'] != null) {
-      return data['error']['message'].toString();
-    }
-    return e.message ?? 'Error de red';
-  }
-  final s = e.toString();
-  return s.length > 140 ? '${s.substring(0, 140)}…' : s;
-}
+String _msg(Object e) => friendlyError(e);

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/errors/error_message.dart';
 import '../application/invoices_controller.dart';
 import '../data/invoices_repository.dart';
 import '../data/models/invoice_models.dart';
@@ -49,7 +50,12 @@ class InvoiceDetailPage extends ConsumerWidget {
       ),
       body: async.when(
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text('Error: $e')),
+        error: (e, _) => Center(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: Text(friendlyError(e), textAlign: TextAlign.center),
+          ),
+        ),
         data: (inv) => _Detail(invoice: inv),
       ),
     );

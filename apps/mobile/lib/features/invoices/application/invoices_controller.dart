@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/errors/failures.dart';
+import '../../reports/application/summary_controller.dart';
 import '../data/invoices_repository.dart';
 import 'invoices_state.dart';
 
@@ -30,6 +31,7 @@ class InvoicesController extends Notifier<InvoicesState> {
     try {
       await _repo.importXml(xml);
       await load();
+      _refreshDashboard();
       state = state.copyWith(isImporting: false, infoMessage: 'Factura importada');
       return true;
     } on Failure catch (f) {
@@ -42,11 +44,17 @@ class InvoicesController extends Notifier<InvoicesState> {
     try {
       await _repo.delete(id);
       await load();
+      _refreshDashboard();
       state = state.copyWith(infoMessage: 'Factura eliminada');
     } on Failure catch (f) {
       state = state.copyWith(errorMessage: f.message);
     }
   }
+
+  /// The Dashboard/Reports summary is cached, so it must be dropped whenever the
+  /// invoice set changes — otherwise "Inicio" keeps showing "Sin datos todavía"
+  /// after the first import.
+  void _refreshDashboard() => ref.invalidate(fiscalSummaryProvider);
 
   void clearMessages() => state = state.copyWith(clearMessages: true);
 }
