@@ -80,6 +80,12 @@ class _Dashboard extends StatelessWidget {
           const SizedBox(height: 12),
           SizedBox(height: 200, child: _MonthlyChart(months: s.byMonth)),
         ],
+        if (s.byCategory.isNotEmpty) ...[
+          const SizedBox(height: 24),
+          Text('Por categoría', style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 12),
+          _CategoryBreakdown(categories: s.byCategory),
+        ],
         const SizedBox(height: 16),
         Text(
           'IRP estimado de forma simplificada. No constituye asesoría fiscal.',
@@ -116,6 +122,65 @@ class _StatCard extends StatelessWidget {
                   style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
             ),
             Text(label, style: TextStyle(fontSize: 11, color: scheme.outline)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Spending split by expense category, biggest first. Categories are derived
+/// server-side by rules today; Marco 2 phase 2E can refine them with AI.
+class _CategoryBreakdown extends StatelessWidget {
+  const _CategoryBreakdown({required this.categories});
+
+  final List<CategoryBucket> categories;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final max = categories.fold<double>(0, (m, c) => c.total > m ? c.total : m);
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Column(
+          children: [
+            for (final c in categories)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            '${c.label} (${c.count})',
+                            style: const TextStyle(fontSize: 13),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          formatGs(c.total),
+                          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(3),
+                      child: LinearProgressIndicator(
+                        value: max <= 0 ? 0 : (c.total / max).clamp(0.0, 1.0),
+                        minHeight: 6,
+                        backgroundColor: scheme.surfaceContainerHighest,
+                        color: scheme.primary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
           ],
         ),
       ),

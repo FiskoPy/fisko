@@ -2,6 +2,7 @@ import PDFDocument from 'pdfkit';
 import ExcelJS from 'exceljs';
 import { prisma } from '../../lib/prisma';
 import { normalizeRuc } from '../../utils/ruc';
+import { categorize, categoryLabel, type CategoryKey } from '../../services/categories';
 
 export interface ReportPeriod {
   from?: Date;
@@ -10,6 +11,14 @@ export interface ReportPeriod {
 
 export interface MonthBucket {
   month: string; // YYYY-MM
+  count: number;
+  total: number;
+  iva: number;
+}
+
+export interface CategoryBucket {
+  key: CategoryKey;
+  label: string;
   count: number;
   total: number;
   iva: number;
@@ -30,6 +39,7 @@ export interface FiscalSummary {
   ivaDebito: number; // IVA de ventas
   irpEstimado: number; // estimación simplificada
   byMonth: MonthBucket[];
+  byCategory: CategoryBucket[];
 }
 
 const num = (d: unknown): number => (d == null ? 0 : Number(d));
@@ -43,6 +53,8 @@ type Row = {
   baseGrav5: unknown;
   baseGrav10: unknown;
   emisorRuc: string;
+  emisorNombre: string;
+  items: { descripcion: string }[];
 };
 
 export async function getSummary(userId: string, period: ReportPeriod): Promise<FiscalSummary> {
@@ -70,6 +82,9 @@ export async function getSummary(userId: string, period: ReportPeriod): Promise<
       baseGrav5: true,
       baseGrav10: true,
       emisorRuc: true,
+      emisorNombre: true,
+      // Item descriptions feed the (rule-based) category derivation.
+      items: { select: { descripcion: true } },
     },
     orderBy: { fechaEmision: 'asc' },
   })) as Row[];
@@ -87,6 +102,7 @@ export async function getSummary(userId: string, period: ReportPeriod): Promise<
     ivaDebito: 0,
   };
   const months = new Map<string, MonthBucket>();
+  const cats = new Map<CategoryKey, CategoryBucket>();
 
   for (const r of rows) {
     const totalOpe = num(r.totalOpe);
@@ -113,6 +129,22 @@ export async function getSummary(userId: string, period: ReportPeriod): Promise<
     b.total += totalOpe;
     b.iva += totalIva;
     months.set(key, b);
+
+    const catKey = categorize(
+      r.emisorNombre ?? '',
+      (r.items ?? []).map((i) => i.descripcion),
+    );
+    const cb = cats.get(catKey) ?? {
+      key: catKey,
+      label: categoryLabel(catKey),
+      count: 0,
+      total: 0,
+      iva: 0,
+    };
+    cb.count += 1;
+    cb.total += totalOpe;
+    cb.iva += totalIva;
+    cats.set(catKey, cb);
   }
 
   // IRP — estimativa simplificada: 10% sobre o ganho neto positivo (ventas - compras).
@@ -127,6 +159,7 @@ export async function getSummary(userId: string, period: ReportPeriod): Promise<
     ...sum,
     irpEstimado,
     byMonth: [...months.values()].sort((a, b) => a.month.localeCompare(b.month)),
+    byCategory: [...cats.values()].sort((a, b) => b.total - a.total),
   };
 }
 
@@ -172,6 +205,15 @@ export async function buildPdf(summary: FiscalSummary): Promise<Buffer> {
   line('IVA débito (ventas)', fmtGs(summary.ivaDebito));
   line('IRP estimado (simplificado)', fmtGs(summary.irpEstimado), true);
   doc.moveDown(0.6);
+
+  if (summary.byCategory.length) {
+    doc.fontSize(13).fillColor('#0E7C66').text('Por categoría');
+    doc.moveDown(0.3);
+    for (const c of summary.byCategory) {
+      line(`${c.label} (${c.count})`, `${fmtGs(c.total)} · IVA ${fmtGs(c.iva)}`);
+    }
+    doc.moveDown(0.6);
+  }
 
   if (summary.byMonth.length) {
     doc.fontSize(13).fillColor('#0E7C66').text('Por mes');
@@ -224,6 +266,18 @@ export async function buildExcel(summary: FiscalSummary): Promise<Buffer> {
     wm.addRow({ m: m.month, n: m.count, t: Math.round(m.total), i: Math.round(m.iva) });
   }
   wm.getRow(1).font = { bold: true };
+
+  const wc = wb.addWorksheet('Por categoría');
+  wc.columns = [
+    { header: 'Categoría', key: 'c', width: 24 },
+    { header: 'Comprobantes', key: 'n', width: 14 },
+    { header: 'Total (Gs)', key: 't', width: 18 },
+    { header: 'IVA (Gs)', key: 'i', width: 18 },
+  ];
+  for (const c of summary.byCategory) {
+    wc.addRow({ c: c.label, n: c.count, t: Math.round(c.total), i: Math.round(c.iva) });
+  }
+  wc.getRow(1).font = { bold: true };
 
   const out = await wb.xlsx.writeBuffer();
   return Buffer.from(out);

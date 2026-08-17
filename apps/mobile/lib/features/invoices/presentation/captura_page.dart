@@ -49,7 +49,27 @@ class CapturaPage extends ConsumerWidget {
     });
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Captura')),
+      appBar: AppBar(
+        title: const Text('Captura'),
+        actions: [
+          // The tab's camera icon promises photo capture; OCR is Marco 2 phase
+          // 2D and not built yet. Say so explicitly instead of letting the icon
+          // imply a feature that silently does not exist.
+          IconButton(
+            icon: const Icon(Icons.photo_camera_outlined),
+            tooltip: 'Sacar foto a una factura (próximamente)',
+            onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'Sacar foto a facturas de papel estará disponible próximamente. '
+                  'Por ahora importá el XML de la factura electrónica.',
+                ),
+                duration: Duration(seconds: 4),
+              ),
+            ),
+          ),
+        ],
+      ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: state.isImporting ? null : () => _importXml(context, ref),
         icon: state.isImporting

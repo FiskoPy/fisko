@@ -16,6 +16,19 @@ class MonthBucket with _$MonthBucket {
 }
 
 @freezed
+class CategoryBucket with _$CategoryBucket {
+  const factory CategoryBucket({
+    required String key,
+    required String label,
+    required int count,
+    required double total,
+    required double iva,
+  }) = _CategoryBucket;
+
+  factory CategoryBucket.fromJson(Map<String, dynamic> json) => _$CategoryBucketFromJson(json);
+}
+
+@freezed
 class FiscalSummary with _$FiscalSummary {
   const factory FiscalSummary({
     @Default(0) int count,
@@ -31,6 +44,7 @@ class FiscalSummary with _$FiscalSummary {
     @Default(0) double ivaDebito,
     @Default(0) double irpEstimado,
     @Default([]) List<MonthBucket> byMonth,
+    @Default([]) List<CategoryBucket> byCategory,
   }) = _FiscalSummary;
 
   factory FiscalSummary.fromJson(Map<String, dynamic> json) => _$FiscalSummaryFromJson(json);
