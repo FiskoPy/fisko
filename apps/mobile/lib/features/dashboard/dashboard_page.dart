@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/errors/error_message.dart';
 import '../../core/format.dart';
+import '../../core/theme/app_theme.dart';
 import '../reports/application/summary_controller.dart';
 import '../reports/data/models/summary_models.dart';
 
@@ -55,40 +56,60 @@ class _Dashboard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final s = summary;
+    final fisko = Theme.of(context).extension<FiskoColors>()!;
+
     return ListView(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
       children: [
+        _IvaComposition(summary: s),
+        const SizedBox(height: 16),
         GridView.count(
           crossAxisCount: 2,
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
           mainAxisSpacing: 12,
           crossAxisSpacing: 12,
-          childAspectRatio: 1.7,
+          childAspectRatio: 1.75,
           children: [
-            _StatCard(label: 'Total operaciones', value: formatGs(s.totalOpe), icon: Icons.summarize),
-            _StatCard(label: 'Total IVA', value: formatGs(s.totalIva), icon: Icons.percent),
-            _StatCard(label: 'IVA 5%', value: formatGs(s.iva5), icon: Icons.looks_5_outlined),
-            _StatCard(label: 'IVA 10%', value: formatGs(s.iva10), icon: Icons.looks_one_outlined),
-            _StatCard(label: 'Comprobantes', value: '${s.count}', icon: Icons.receipt_long),
-            _StatCard(label: 'IRP estimado', value: formatGs(s.irpEstimado), icon: Icons.account_balance),
+            _StatCard(
+              label: 'Ventas (ingresos)',
+              value: formatGs(s.ventas),
+              icon: Icons.north_east,
+              tint: fisko.debito,
+            ),
+            _StatCard(
+              label: 'Compras (gastos)',
+              value: formatGs(s.compras),
+              icon: Icons.south_west,
+              tint: fisko.credito,
+            ),
+            _StatCard(
+              label: 'Comprobantes',
+              value: '${s.count}',
+              icon: Icons.receipt_long,
+            ),
+            _StatCard(
+              label: 'IRP estimado',
+              value: formatGs(s.irpEstimado),
+              icon: Icons.account_balance,
+            ),
           ],
         ),
-        const SizedBox(height: 24),
         if (s.byMonth.isNotEmpty) ...[
+          const SizedBox(height: 28),
           Text('Operaciones por mes', style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 12),
           SizedBox(height: 200, child: _MonthlyChart(months: s.byMonth)),
         ],
         if (s.byCategory.isNotEmpty) ...[
-          const SizedBox(height: 24),
+          const SizedBox(height: 28),
           Text('Por categoría', style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 12),
           _CategoryBreakdown(categories: s.byCategory),
         ],
-        const SizedBox(height: 16),
+        const SizedBox(height: 20),
         Text(
-          'IRP estimado de forma simplificada. No constituye asesoría fiscal.',
+          'El IRP se estima de forma simplificada. No constituye asesoría fiscal.',
           style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.outline),
         ),
       ],
@@ -96,31 +117,194 @@ class _Dashboard extends StatelessWidget {
   }
 }
 
+/// The screen's anchor: Paraguayan IVA has exactly two rates, so the headline
+/// figure is the total and the one thing worth seeing at a glance is how it
+/// splits between them. Green is always 5%, amber is always 10% — the same two
+/// colours used in every chart and in the PDF/Excel reports.
+class _IvaComposition extends StatelessWidget {
+  const _IvaComposition({required this.summary});
+
+  final FiscalSummary summary;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final fisko = theme.extension<FiskoColors>()!;
+    final s = summary;
+    final total = s.iva5 + s.iva10;
+    final pct5 = total <= 0 ? 0.0 : s.iva5 / total;
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'IVA del período',
+              style: TextStyle(fontSize: 12, color: theme.colorScheme.outline),
+            ),
+            const SizedBox(height: 6),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(
+                formatGs(s.totalIva),
+                style: theme.textTheme.headlineMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: -1,
+                  fontFeatures: AppTheme.tabularFigures,
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            if (total > 0)
+              ClipRRect(
+                borderRadius: BorderRadius.circular(6),
+                child: SizedBox(
+                  height: 12,
+                  child: Row(
+                    children: [
+                      if (pct5 > 0)
+                        Expanded(
+                          flex: (pct5 * 1000).round().clamp(1, 1000),
+                          child: ColoredBox(color: fisko.iva5),
+                        ),
+                      if (pct5 < 1)
+                        Expanded(
+                          flex: ((1 - pct5) * 1000).round().clamp(1, 1000),
+                          child: ColoredBox(color: fisko.iva10),
+                        ),
+                    ],
+                  ),
+                ),
+              )
+            else
+              Text(
+                'Sin IVA discriminado en las facturas importadas.',
+                style: TextStyle(fontSize: 12, color: theme.colorScheme.outline),
+              ),
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                Expanded(
+                  child: _RateLegend(
+                    color: fisko.iva5,
+                    label: 'IVA 5%',
+                    amount: s.iva5,
+                    base: s.baseGrav5,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _RateLegend(
+                    color: fisko.iva10,
+                    label: 'IVA 10%',
+                    amount: s.iva10,
+                    base: s.baseGrav10,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _RateLegend extends StatelessWidget {
+  const _RateLegend({
+    required this.color,
+    required this.label,
+    required this.amount,
+    required this.base,
+  });
+
+  final Color color;
+  final String label;
+  final double amount;
+  final double base;
+
+  @override
+  Widget build(BuildContext context) {
+    final outline = Theme.of(context).colorScheme.outline;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Container(
+              height: 8,
+              width: 8,
+              decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+            ),
+            const SizedBox(width: 6),
+            Text(label, style: TextStyle(fontSize: 12, color: outline)),
+          ],
+        ),
+        const SizedBox(height: 2),
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: Text(
+            formatGs(amount),
+            style: const TextStyle(
+              fontWeight: FontWeight.w600,
+              fontSize: 15,
+              fontFeatures: AppTheme.tabularFigures,
+            ),
+          ),
+        ),
+        Text(
+          'Base ${formatGs(base)}',
+          style: TextStyle(fontSize: 11, color: outline),
+          overflow: TextOverflow.ellipsis,
+        ),
+      ],
+    );
+  }
+}
+
 class _StatCard extends StatelessWidget {
-  const _StatCard({required this.label, required this.value, required this.icon});
+  const _StatCard({
+    required this.label,
+    required this.value,
+    required this.icon,
+    this.tint,
+  });
 
   final String label;
   final String value;
   final IconData icon;
+  final Color? tint;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(14),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Icon(icon, color: scheme.primary, size: 20),
+            Icon(icon, color: tint ?? scheme.primary, size: 18),
             const Spacer(),
             FittedBox(
               fit: BoxFit.scaleDown,
               alignment: Alignment.centerLeft,
-              child: Text(value,
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+              child: Text(
+                value,
+                style: const TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 18,
+                  letterSpacing: -0.5,
+                  fontFeatures: AppTheme.tabularFigures,
+                ),
+              ),
             ),
+            const SizedBox(height: 2),
             Text(label, style: TextStyle(fontSize: 11, color: scheme.outline)),
           ],
         ),
@@ -139,16 +323,17 @@ class _CategoryBreakdown extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final fisko = Theme.of(context).extension<FiskoColors>()!;
     final max = categories.fold<double>(0, (m, c) => c.total > m ? c.total : m);
 
     return Card(
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         child: Column(
           children: [
-            for (final c in categories)
+            for (final (i, c) in categories.indexed)
               Padding(
-                padding: const EdgeInsets.symmetric(vertical: 6),
+                padding: EdgeInsets.only(top: i == 0 ? 0 : 14),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -156,7 +341,7 @@ class _CategoryBreakdown extends StatelessWidget {
                       children: [
                         Expanded(
                           child: Text(
-                            '${c.label} (${c.count})',
+                            '${c.label} · ${c.count}',
                             style: const TextStyle(fontSize: 13),
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -164,18 +349,22 @@ class _CategoryBreakdown extends StatelessWidget {
                         const SizedBox(width: 8),
                         Text(
                           formatGs(c.total),
-                          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            fontFeatures: AppTheme.tabularFigures,
+                          ),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 6),
                     ClipRRect(
                       borderRadius: BorderRadius.circular(3),
                       child: LinearProgressIndicator(
                         value: max <= 0 ? 0 : (c.total / max).clamp(0.0, 1.0),
                         minHeight: 6,
                         backgroundColor: scheme.surfaceContainerHighest,
-                        color: scheme.primary,
+                        color: fisko.categoryAt(i),
                       ),
                     ),
                   ],

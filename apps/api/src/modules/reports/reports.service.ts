@@ -166,12 +166,18 @@ export async function getSummary(userId: string, period: ReportPeriod): Promise<
 const fmtGs = (v: number): string =>
   'Gs ' + Math.round(v).toLocaleString('es-PY').replace(/,/g, '.');
 
+// Brand palette, kept in sync with the app's theme (apps/mobile/lib/core/theme).
+// IVA5/IVA10 are reserved: green always means the 5% rate, amber the 10% one.
+const BRAND = '#14508F'; // azul Ypacaraí
+const IVA5 = '#2E8B6F'; // verde
+const IVA10 = '#B8801F'; // ámbar (darkened for contrast on white paper)
+
 export async function buildPdf(summary: FiscalSummary): Promise<Buffer> {
   const doc = new PDFDocument({ size: 'A4', margin: 48 });
   const chunks: Buffer[] = [];
   doc.on('data', (c: Buffer) => chunks.push(c));
 
-  doc.fontSize(20).fillColor('#0E7C66').text('Fisko — Reporte fiscal', { align: 'left' });
+  doc.fontSize(20).fillColor('#14508F').text('Fisko — Reporte fiscal', { align: 'left' });
   doc.moveDown(0.3);
   doc.fontSize(10).fillColor('#555');
   const p = summary.period;
@@ -180,24 +186,25 @@ export async function buildPdf(summary: FiscalSummary): Promise<Buffer> {
   );
   doc.moveDown(1);
 
-  const line = (label: string, value: string, bold = false) => {
-    doc.fontSize(bold ? 13 : 11).fillColor(bold ? '#0E7C66' : '#000');
+  const line = (label: string, value: string, bold = false, color?: string) => {
+    doc.fontSize(bold ? 13 : 11).fillColor(color ?? (bold ? BRAND : '#000'));
     const y = doc.y;
     doc.text(label, 48, y);
     doc.text(value, 48, y, { align: 'right', width: doc.page.width - 96 });
     doc.moveDown(bold ? 0.6 : 0.4);
   };
 
-  doc.fontSize(13).fillColor('#0E7C66').text('IVA');
+  doc.fontSize(13).fillColor(BRAND).text('IVA');
   doc.moveDown(0.3);
+  // Same colour discipline as the app: green is always 5%, amber always 10%.
   line('Base gravada 5%', fmtGs(summary.baseGrav5));
-  line('IVA 5%', fmtGs(summary.iva5));
+  line('IVA 5%', fmtGs(summary.iva5), false, IVA5);
   line('Base gravada 10%', fmtGs(summary.baseGrav10));
-  line('IVA 10%', fmtGs(summary.iva10));
+  line('IVA 10%', fmtGs(summary.iva10), false, IVA10);
   line('Total IVA', fmtGs(summary.totalIva), true);
   doc.moveDown(0.6);
 
-  doc.fontSize(13).fillColor('#0E7C66').text('Resumen');
+  doc.fontSize(13).fillColor('#14508F').text('Resumen');
   doc.moveDown(0.3);
   line('Ventas (ingresos)', fmtGs(summary.ventas));
   line('Compras (gastos)', fmtGs(summary.compras));
@@ -207,7 +214,7 @@ export async function buildPdf(summary: FiscalSummary): Promise<Buffer> {
   doc.moveDown(0.6);
 
   if (summary.byCategory.length) {
-    doc.fontSize(13).fillColor('#0E7C66').text('Por categoría');
+    doc.fontSize(13).fillColor('#14508F').text('Por categoría');
     doc.moveDown(0.3);
     for (const c of summary.byCategory) {
       line(`${c.label} (${c.count})`, `${fmtGs(c.total)} · IVA ${fmtGs(c.iva)}`);
@@ -216,7 +223,7 @@ export async function buildPdf(summary: FiscalSummary): Promise<Buffer> {
   }
 
   if (summary.byMonth.length) {
-    doc.fontSize(13).fillColor('#0E7C66').text('Por mes');
+    doc.fontSize(13).fillColor('#14508F').text('Por mes');
     doc.moveDown(0.3);
     for (const m of summary.byMonth) {
       line(`${m.month} (${m.count})`, `${fmtGs(m.total)} · IVA ${fmtGs(m.iva)}`);
