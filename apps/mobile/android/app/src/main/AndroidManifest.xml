@@ -43,5 +43,13 @@
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
         </intent>
+        <!-- Required by url_launcher to open the privacy policy on Android 11+
+             (API 30). Package visibility hides browser activities unless they
+             are declared here, and url_launcher stopped injecting this itself
+             in 6.1 — without it launchUrl just returns false. -->
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="https"/>
+        </intent>
     </queries>
 </manifest>
