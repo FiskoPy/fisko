@@ -60,3 +60,9 @@ export async function logout(req: AuthedRequest, res: Response): Promise<void> {
   await authService.logout(req.user.sub);
   res.status(200).json({ ok: true });
 }
+
+export async function deleteMe(req: AuthedRequest, res: Response): Promise<void> {
+  if (!req.user) throw AppError.unauthorized();
+  await authService.deleteAccount(req.user.sub);
+  res.status(200).json({ ok: true });
+}

@@ -41,6 +41,9 @@ dependencies:
   share_plus: ^10.1.2
   path_provider: ^2.1.5
 
+  # Abrir la política de privacidad (y, más adelante, el checkout de Pagopar)
+  url_launcher: ^6.3.1
+
   intl: ^0.20.2
 
 dev_dependencies:

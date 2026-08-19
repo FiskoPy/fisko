@@ -21,4 +21,14 @@ class Env {
   );
 
   static bool get hasGoogleClientId => googleOauthClientId.isNotEmpty;
+
+  /// Host serving the public legal pages, derived from [apiBaseUrl] by dropping
+  /// the /api/v1 suffix — they are mounted at the root, not under the API.
+  static String get _origin {
+    final i = apiBaseUrl.indexOf('/api/');
+    return i > 0 ? apiBaseUrl.substring(0, i) : apiBaseUrl;
+  }
+
+  static String get privacyUrl => '$_origin/privacidad';
+  static String get deleteAccountUrl => '$_origin/eliminar-cuenta';
 }

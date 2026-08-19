@@ -202,3 +202,21 @@ export async function getMe(userId: string): Promise<PublicUser> {
   }
   return toPublicUser(user);
 }
+
+/**
+ * Permanently deletes the account and everything hanging off it. Every relation
+ * to User is onDelete: Cascade (email connections, invoices and their items,
+ * password-reset tokens), so one delete is enough.
+ *
+ * App Store guideline 5.1.1(v) requires account deletion to be reachable from
+ * inside the app, not only from a web page, for any app that offers sign-up.
+ */
+export async function deleteAccount(userId: string): Promise<void> {
+  try {
+    await prisma.user.delete({ where: { id: userId } });
+  } catch {
+    // Already gone (or never existed): deletion is idempotent from the caller's
+    // point of view, so don't leak a 500 for a repeated request.
+    throw AppError.notFound('User not found');
+  }
+}

@@ -6,6 +6,7 @@ import { logger } from './lib/logger';
 import { apiLimiter } from './middleware/rate-limit';
 import { errorHandler, notFoundHandler } from './middleware/error-handler';
 import { apiRouter } from './routes';
+import { legalRouter } from './modules/legal/legal.routes';
 
 export function createApp(): Express {
   const app = express();
@@ -23,6 +24,10 @@ export function createApp(): Express {
 
   // All routes live under /api/v1.
   app.use('/api/v1', apiRouter);
+
+  // Store-required legal pages, deliberately at the root so the URLs given to
+  // Google Play and App Store Connect look like web pages, not API endpoints.
+  app.use('/', legalRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

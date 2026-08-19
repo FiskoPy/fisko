@@ -70,6 +70,17 @@ class AuthRepository {
     }
   }
 
+  /// Deletes the account server-side, then clears the local session. Unlike
+  /// logout, a failure here must surface: the user has to know the account is
+  /// still alive.
+  Future<void> deleteAccount() async {
+    await _run(() async {
+      await _api.deleteAccount();
+      return null;
+    });
+    await _tokenStorage.clear();
+  }
+
   Future<bool> hasSession() => _tokenStorage.hasSession();
 
   Future<void> _persist(AuthTokens tokens) async {

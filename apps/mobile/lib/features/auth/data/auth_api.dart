@@ -62,6 +62,12 @@ class AuthApi {
   Future<void> logout() async {
     await _dio.post<Map<String, dynamic>>('/auth/logout');
   }
+
+  /// Permanently deletes the account. App Store guideline 5.1.1(v) requires
+  /// this to be reachable in-app, not only from a web page.
+  Future<void> deleteAccount() async {
+    await _dio.delete<Map<String, dynamic>>('/auth/me');
+  }
 }
 
 final authApiProvider = Provider<AuthApi>((ref) {

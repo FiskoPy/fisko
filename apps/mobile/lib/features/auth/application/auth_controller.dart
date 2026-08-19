@@ -82,6 +82,14 @@ class AuthController extends Notifier<AuthState> {
     state = const AuthState(status: AuthStatus.unauthenticated);
   }
 
+  /// Deletes the account and drops the session. Returns false (with a message
+  /// in state) when the server refused, so the UI does not pretend it worked.
+  Future<bool> deleteAccount() async {
+    final ok = await _submit(() => _repo.deleteAccount());
+    if (ok) state = const AuthState(status: AuthStatus.unauthenticated);
+    return ok;
+  }
+
   void clearMessages() => state = state.copyWith(clearMessages: true);
 
   /// Runs [action] toggling the submitting flag and mapping failures to a
