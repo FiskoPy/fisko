@@ -53,6 +53,43 @@ function resolveImap(input: ConnectEmailInput): { host: string; port: number; se
   return { host, port, secure };
 }
 
+/**
+ * Turns an IMAP failure into something the user can act on.
+ *
+ * "No se pudo iniciar sesión" for every failure is useless: it sends people to
+ * re-check a password when the real problem is an unreachable host (or the
+ * other way round). Network-level failures name the host and port; only an
+ * actual rejection by the server blames the credentials.
+ */
+export function imapFailureMessage(
+  err: unknown,
+  provider: string,
+  host: string,
+  port: number,
+): string {
+  const code = (err as { code?: string })?.code ?? '';
+  const raw = (err as Error)?.message ?? '';
+  const text = `${code} ${raw}`.toUpperCase();
+
+  const unreachable = ['ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED', 'ETIMEDOUT', 'EHOSTUNREACH', 'ECONNRESET', 'TIMEOUT'];
+  if (unreachable.some((c) => text.includes(c))) {
+    return `No pudimos conectarnos a ${host}:${port}. Revisá el servidor y el puerto con tu proveedor de correo.`;
+  }
+  if (text.includes('CERT') || text.includes('SSL') || text.includes('TLS')) {
+    return `Hubo un problema de seguridad (SSL) al conectar con ${host}:${port}. Probá el puerto 993.`;
+  }
+
+  // Reached the server, and it said no.
+  if (provider === 'gmail') {
+    return 'El servidor rechazó los datos. Para Gmail necesitás una "contraseña de aplicación" de 16 letras, no tu contraseña habitual.';
+  }
+  return (
+    `${host} rechazó el usuario o la contraseña. Verificá que sean los mismos con los que entrás ` +
+    'al webmail. Si tu proveedor pide sólo el nombre de usuario (sin @dominio), pedile a tu ' +
+    'proveedor de correo el usuario exacto para IMAP.'
+  );
+}
+
 function ensureCrypto(): void {
   if (!isCryptoConfigured()) {
     throw AppError.internal(
@@ -73,10 +110,11 @@ export async function connectEmail(
   try {
     await verifyImapLogin(creds);
   } catch (err) {
-    logger.warn({ err: (err as Error).message }, 'email connect: login failed');
-    throw AppError.badRequest(
-      'No se pudo iniciar sesión en la casilla. Verificá el e-mail y la contraseña de aplicación.',
+    logger.warn(
+      { err: (err as Error).message, host, port, provider: input.provider },
+      'email connect: login failed',
     );
+    throw AppError.badRequest(imapFailureMessage(err, input.provider, host, port));
   }
 
   const secretEnc = encryptSecret(input.appPassword);
