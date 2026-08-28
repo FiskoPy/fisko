@@ -32,10 +32,27 @@ class _ResetPasswordPageState extends ConsumerState<ResetPasswordPage> {
     super.dispose();
   }
 
+  /// The code is 64 hex chars in one line, which is exactly the kind of string
+  /// a chat app breaks across lines or a finger selects half of. Strip anything
+  /// that is not hex before validating, and say *how many* characters are
+  /// missing so the user knows to re-copy rather than assume the code expired.
+  static String _cleanCode(String raw) =>
+      raw.replaceAll(RegExp(r'[^0-9a-fA-F]'), '').toLowerCase();
+
+  String? _validateCode(String? v) {
+    final c = _cleanCode(v ?? '');
+    if (c.isEmpty) return 'Pegá el código de recuperación';
+    if (c.length != 64) {
+      return 'El código está incompleto (${c.length} de 64 caracteres). '
+          'Volvé a copiarlo entero.';
+    }
+    return null;
+  }
+
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
     final ok = await ref.read(authControllerProvider.notifier).resetPassword(
-          token: _token.text.trim(),
+          token: _cleanCode(_token.text),
           newPassword: _password.text,
         );
     if (ok && mounted) {
@@ -63,7 +80,20 @@ class _ResetPasswordPageState extends ConsumerState<ResetPasswordPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      PlainTextField(controller: _token, label: 'Código de recuperación'),
+                      TextFormField(
+                        controller: _token,
+                        validator: _validateCode,
+                        autovalidateMode: AutovalidateMode.onUserInteraction,
+                        keyboardType: TextInputType.visiblePassword,
+                        autocorrect: false,
+                        enableSuggestions: false,
+                        maxLines: 2,
+                        style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
+                        decoration: const InputDecoration(
+                          labelText: 'Código de recuperación',
+                          helperText: '64 caracteres. Pegalo entero, sin espacios.',
+                        ),
+                      ),
                       const SizedBox(height: 16),
                       PasswordField(controller: _password, label: l10n.newPassword),
                       const SizedBox(height: 24),
