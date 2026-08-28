@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/errors/failures.dart';
+import '../../../core/network/dio_client.dart';
 import '../data/auth_repository.dart';
 import 'auth_state.dart';
 
@@ -11,6 +12,22 @@ class AuthController extends Notifier<AuthState> {
 
   @override
   AuthState build() {
+    // The HTTP client drops the session when a refresh is rejected (e.g. the
+    // password was reset elsewhere and tokenVersion moved on). React here so
+    // the router sends the user to login instead of leaving them on a screen
+    // whose every request now fails with "Missing Bearer token".
+    final expired = ref.watch(dioClientProvider).sessionExpired;
+    void onExpired() {
+      if (state.status == AuthStatus.authenticated) {
+        state = const AuthState(
+          status: AuthStatus.unauthenticated,
+          errorMessage: 'Tu sesión venció. Iniciá sesión de nuevo.',
+        );
+      }
+    }
+    expired.addListener(onExpired);
+    ref.onDispose(() => expired.removeListener(onExpired));
+
     // Kick off the session check; state starts as `unknown`.
     Future.microtask(_restoreSession);
     return const AuthState();

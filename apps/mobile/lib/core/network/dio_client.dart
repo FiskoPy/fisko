@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart' show ValueNotifier;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../config/env.dart';
@@ -25,6 +26,18 @@ class DioClient {
   final TokenStorage _tokenStorage;
   late final Dio dio;
 
+  /// Fires (increments) whenever the client gives up on the session: the
+  /// refresh token was rejected or missing. Until now this path only cleared
+  /// storage, so the UI stayed on an authenticated screen while every request
+  /// went out without a Bearer — the user saw "Missing Bearer token" instead
+  /// of the login screen. AuthController listens and flips to unauthenticated.
+  final ValueNotifier<int> sessionExpired = ValueNotifier<int>(0);
+
+  Future<void> _dropSession() async {
+    await _dropSession();
+    sessionExpired.value++;
+  }
+
   // A bare client without interceptors, used to perform the refresh call so we
   // don't recurse into the 401 handler.
   Dio get _bareClient => Dio(BaseOptions(baseUrl: Env.apiBaseUrl));
@@ -50,7 +63,7 @@ class DioClient {
 
         final refreshToken = await _tokenStorage.readRefreshToken();
         if (refreshToken == null) {
-          await _tokenStorage.clear();
+          await _dropSession();
           return handler.next(error);
         }
 
@@ -61,7 +74,7 @@ class DioClient {
           );
           final tokens = res.data?['tokens'] as Map<String, dynamic>?;
           if (tokens == null) {
-            await _tokenStorage.clear();
+            await _dropSession();
             return handler.next(error);
           }
           await _tokenStorage.saveTokens(
@@ -76,7 +89,7 @@ class DioClient {
           final retried = await dio.fetch<dynamic>(req);
           return handler.resolve(retried);
         } catch (_) {
-          await _tokenStorage.clear();
+          await _dropSession();
           return handler.next(error);
         }
       },
