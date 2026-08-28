@@ -271,10 +271,16 @@ class _ConnectFormState extends ConsumerState<_ConnectForm> {
             const SizedBox(height: 16),
             DropdownButtonFormField<String>(
               initialValue: _provider,
-              decoration: const InputDecoration(labelText: 'Proveedor'),
+              decoration: const InputDecoration(
+                labelText: 'Proveedor',
+                // Outlook/Hotmail personal accounts no longer accept IMAP with a
+                // password (Microsoft disabled basic auth); they need OAuth,
+                // which is Marco 2 phase 2C-Outlook and blocked on the Azure app.
+                helperText: 'Outlook/Hotmail: próximamente (requiere conexión por Microsoft).',
+                helperMaxLines: 2,
+              ),
               items: const [
                 DropdownMenuItem(value: 'gmail', child: Text('Gmail')),
-                DropdownMenuItem(value: 'outlook', child: Text('Outlook')),
                 DropdownMenuItem(
                   value: 'imap',
                   child: Text('Otro / correo corporativo'),
@@ -338,15 +344,6 @@ class _ConnectFormState extends ConsumerState<_ConnectForm> {
               validator: (v) =>
                   (v == null || v.trim().length < 4) ? 'Ingresá la contraseña' : null,
             ),
-            if (_provider == 'outlook')
-              const Padding(
-                padding: EdgeInsets.only(top: 8),
-                child: Text(
-                  'Nota: las cuentas personales de Outlook pueden requerir conexión por OAuth '
-                  '(próximamente). Si tu casilla permite IMAP con contraseña de aplicación, funcionará.',
-                  style: TextStyle(fontSize: 12),
-                ),
-              ),
             if (_isCustom)
               const Padding(
                 padding: EdgeInsets.only(top: 8),
