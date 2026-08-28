@@ -1,5 +1,5 @@
 import 'package:dio/dio.dart';
-import 'package:flutter/foundation.dart' show ValueNotifier;
+import 'package:flutter/foundation.dart' show ValueNotifier, visibleForTesting;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../config/env.dart';
@@ -33,14 +33,32 @@ class DioClient {
   /// of the login screen. AuthController listens and flips to unauthenticated.
   final ValueNotifier<int> sessionExpired = ValueNotifier<int>(0);
 
+  /// A 401/403 from the refresh endpoint means the refresh token itself was
+  /// rejected. Anything else (5xx, timeout, connection error) is transport.
+  static bool _isAuthRejection(DioException e) {
+    final s = e.response?.statusCode;
+    return s == 401 || s == 403;
+  }
+
   Future<void> _dropSession() async {
-    await _dropSession();
+    await _tokenStorage.clear();
     sessionExpired.value++;
   }
 
-  // A bare client without interceptors, used to perform the refresh call so we
-  // don't recurse into the 401 handler.
-  Dio get _bareClient => Dio(BaseOptions(baseUrl: Env.apiBaseUrl));
+  /// A bare client without interceptors, used for the refresh call so we do not
+  /// recurse into the 401 handler. Built once (it used to be rebuilt on every
+  /// 401) and exposed so tests can stub its adapter — otherwise any test of the
+  /// refresh path reaches the real network.
+  @visibleForTesting
+  late final Dio refreshClient = Dio(
+    BaseOptions(
+      baseUrl: Env.apiBaseUrl,
+      // Same generous timeouts as the main client: this call also has to
+      // survive a cold start, and a bare Dio would give up after 0ms/none.
+      connectTimeout: const Duration(seconds: 60),
+      receiveTimeout: const Duration(seconds: 60),
+    ),
+  );
 
   InterceptorsWrapper _authInterceptor() {
     return InterceptorsWrapper(
@@ -68,7 +86,7 @@ class DioClient {
         }
 
         try {
-          final res = await _bareClient.post<Map<String, dynamic>>(
+          final res = await refreshClient.post<Map<String, dynamic>>(
             '/auth/refresh',
             data: {'refreshToken': refreshToken},
           );
@@ -88,8 +106,14 @@ class DioClient {
           req.headers['Authorization'] = 'Bearer ${tokens['accessToken']}';
           final retried = await dio.fetch<dynamic>(req);
           return handler.resolve(retried);
+        } on DioException catch (e) {
+          // Only a genuine rejection ends the session. Transport failures — a
+          // Render cold-start 503, a timeout, no signal, a 429 from the auth
+          // limiter — are temporary, and dropping the tokens there would throw
+          // away a valid 30-day session over a hiccup.
+          if (_isAuthRejection(e)) await _dropSession();
+          return handler.next(error);
         } catch (_) {
-          await _dropSession();
           return handler.next(error);
         }
       },

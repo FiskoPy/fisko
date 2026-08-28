@@ -51,13 +51,23 @@ class PerfilPage extends ConsumerWidget {
     if (confirmed != true || !context.mounted) return;
 
     final ok = await ref.read(authControllerProvider.notifier).deleteAccount();
-    if (ok && context.mounted) {
+    if (!context.mounted) return;
+    if (ok) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Tu cuenta fue eliminada.')),
       );
+      return;
     }
-    // On failure the controller puts the reason in state; the shared
-    // auth-message listener surfaces it.
+    // Perfil is outside the auth screens, so AuthMessageListener is not mounted
+    // here — show the reason ourselves instead of failing silently.
+    final reason = ref.read(authControllerProvider).errorMessage;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(reason ?? 'No se pudo eliminar la cuenta.'),
+        backgroundColor: Theme.of(context).colorScheme.error,
+      ),
+    );
+    ref.read(authControllerProvider.notifier).clearMessages();
   }
 
   @override

@@ -2,6 +2,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/errors/failures.dart';
 import '../../../core/network/dio_client.dart';
+import '../../email/data/email_api.dart';
+import '../../invoices/application/invoices_controller.dart';
+import '../../reports/application/summary_controller.dart';
 import '../data/auth_repository.dart';
 import 'auth_state.dart';
 
@@ -42,8 +45,14 @@ class AuthController extends Notifier<AuthState> {
     try {
       final user = await _repo.me();
       state = state.copyWith(status: AuthStatus.authenticated, user: user);
-    } catch (_) {
+    } on AuthFailure {
+      // The server rejected the token: the session really is over.
       state = state.copyWith(status: AuthStatus.unauthenticated);
+    } catch (_) {
+      // Anything else is the network or a sleeping server, not a verdict on
+      // the session. Keep the stored tokens and let the user in; the next
+      // request will refresh, and a genuine 401 lands in the branch above.
+      state = state.copyWith(status: AuthStatus.authenticated);
     }
   }
 
@@ -96,14 +105,27 @@ class AuthController extends Notifier<AuthState> {
 
   Future<void> logout() async {
     await _repo.logout();
+    _clearAccountCaches();
     state = const AuthState(status: AuthStatus.unauthenticated);
+  }
+
+  /// Invoices and the fiscal summary are cached per provider, not per account.
+  /// Without this the next person to log in on the same phone briefly sees the
+  /// previous account's invoices and totals.
+  void _clearAccountCaches() {
+    ref.invalidate(invoicesControllerProvider);
+    ref.invalidate(fiscalSummaryProvider);
+    ref.invalidate(emailConnectionsProvider);
   }
 
   /// Deletes the account and drops the session. Returns false (with a message
   /// in state) when the server refused, so the UI does not pretend it worked.
   Future<bool> deleteAccount() async {
     final ok = await _submit(() => _repo.deleteAccount());
-    if (ok) state = const AuthState(status: AuthStatus.unauthenticated);
+    if (ok) {
+      _clearAccountCaches();
+      state = const AuthState(status: AuthStatus.unauthenticated);
+    }
     return ok;
   }
 

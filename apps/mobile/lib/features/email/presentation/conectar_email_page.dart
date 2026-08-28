@@ -103,12 +103,17 @@ class _ConnectionTileState extends ConsumerState<_ConnectionTile> {
     try {
       final res = await ref.read(emailApiProvider).sync(widget.connection.id, sinceDays: 90);
       if (!mounted) return;
+      // Report failures: saying "no new invoices" when every attachment was
+      // rejected sends the user looking in the wrong place.
+      final failedNote = res.failed > 0 ? ' ${res.failed} no se pudieron leer.' : '';
       final msg = res.imported > 0
           ? 'Importadas ${res.imported} factura(s)'
-              '${res.duplicated > 0 ? ', ${res.duplicated} ya existían' : ''}.'
-          : res.scanned == 0
-              ? 'No se encontraron facturas nuevas en el correo.'
-              : 'Sin facturas nuevas (${res.duplicated} ya estaban importadas).';
+              '${res.duplicated > 0 ? ', ${res.duplicated} ya existían' : ''}.$failedNote'
+          : res.failed > 0
+              ? 'No se pudo importar ninguna: ${res.failed} archivo(s) con error.'
+              : res.scanned == 0
+                  ? 'No se encontraron facturas nuevas en el correo.'
+                  : 'Sin facturas nuevas (${res.duplicated} ya estaban importadas).';
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
       ref.invalidate(emailConnectionsProvider);
       if (res.imported > 0) {

@@ -42,12 +42,16 @@ class SyncResult {
     required this.imported,
     required this.duplicated,
     required this.failed,
+    this.errors = const [],
   });
 
   final int scanned;
   final int imported;
   final int duplicated;
   final int failed;
+
+  /// Per-file reasons for the failures, as returned by the API.
+  final List<String> errors;
 
   factory SyncResult.fromJson(Map<String, dynamic> j) {
     int v(String k) => (j[k] as num?)?.toInt() ?? 0;
@@ -56,6 +60,7 @@ class SyncResult {
       imported: v('imported'),
       duplicated: v('duplicated'),
       failed: v('failed'),
+      errors: (j['errors'] as List?)?.map((e) => e.toString()).toList() ?? const [],
     );
   }
 }
