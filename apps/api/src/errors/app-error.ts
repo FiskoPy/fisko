@@ -39,6 +39,11 @@ export class AppError extends Error {
     return new AppError(429, 'TOO_MANY_REQUESTS', message);
   }
 
+  /** The server itself cannot do this right now (e.g. no mail transport). */
+  static serviceUnavailable(message = 'Service unavailable') {
+    return new AppError(503, 'SERVICE_UNAVAILABLE', message);
+  }
+
   static internal(message = 'Internal server error') {
     return new AppError(500, 'INTERNAL', message);
   }

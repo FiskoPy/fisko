@@ -6,7 +6,7 @@ import { logger } from '../../lib/logger';
 import { AppError } from '../../errors/app-error';
 import { isValidRucDv } from '../../utils/ruc';
 import { verifyGoogleIdToken } from '../../services/google';
-import { sendPasswordResetEmail } from '../../services/mailer';
+import { isMailConfigured, sendPasswordResetEmail } from '../../services/mailer';
 import { issueTokenPair, verifyRefreshToken, type TokenPair } from './tokens';
 import type {
   ForgotPasswordInput,
@@ -140,6 +140,15 @@ export async function refresh(input: RefreshInput): Promise<TokenPair> {
  * When the user exists and has a password, a reset email is sent.
  */
 export async function forgotPassword(input: ForgotPasswordInput): Promise<void> {
+  // Not an information leak: whether the *server* can send mail has nothing to
+  // do with whether this address exists. Without this the endpoint answered
+  // {ok:true} while every email died on a datacenter SMTP block — the user sat
+  // refreshing an inbox that was never going to receive anything.
+  if (!isMailConfigured()) {
+    throw AppError.serviceUnavailable(
+      'El envío de correos no está habilitado en este servidor. Pedile al administrador un código de recuperación.',
+    );
+  }
   const user = await prisma.user.findUnique({ where: { email: input.email } });
   if (!user || !user.passwordHash) {
     logger.info({ email: input.email }, 'forgot-password requested for unknown/google-only account');
@@ -157,8 +166,14 @@ export async function forgotPassword(input: ForgotPasswordInput): Promise<void> 
 
   // Fire-and-forget: email delivery must not block the HTTP response nor leak
   // existence via timing/failures. Errors are logged, never surfaced.
-  void sendPasswordResetEmail(user.email, rawToken).catch((err) => {
-    logger.error({ err, userId: user.id }, 'Failed to send password reset email');
+  void sendPasswordResetEmail(user.email, rawToken).catch((err: unknown) => {
+    // pino serialises a bare Error fine, but nodemailer/fetch errors carry
+    // their detail in .code/.command/.response — flatten so the log is usable.
+    const e = err as { message?: string; code?: string; command?: string; response?: string };
+    logger.error(
+      { userId: user.id, code: e?.code, command: e?.command, detail: e?.response ?? e?.message },
+      'Failed to send password reset email',
+    );
   });
 }
 

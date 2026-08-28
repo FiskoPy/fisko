@@ -81,6 +81,18 @@ async function sendViaBrevoApi(input: SendMailInput): Promise<void> {
   logger.info({ to: input.to, messageId: data.messageId }, 'Email sent (Brevo API)');
 }
 
+/**
+ * True when a real outbound transport is configured (Brevo API or SMTP).
+ *
+ * Without one, sendMail falls through to an Ethereal *test* inbox — fine for a
+ * dev laptop, but on a cloud host it means nobody ever receives anything, and
+ * that is not a secret worth protecting with a silent 200. Callers that owe the
+ * user an email (password reset) must check this and say so.
+ */
+export function isMailConfigured(): boolean {
+  return Boolean(env.BREVO_API_KEY) || Boolean(env.SMTP_HOST && env.SMTP_USER && env.SMTP_PASS);
+}
+
 export async function sendMail(input: SendMailInput): Promise<void> {
   if (env.BREVO_API_KEY) {
     await sendViaBrevoApi(input);
