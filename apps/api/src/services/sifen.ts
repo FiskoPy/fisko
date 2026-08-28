@@ -37,6 +37,8 @@ export interface ParsedDte {
   receptorNombre: string | null;
   fechaEmision: Date;
   moneda: string;
+  /// Exchange rate to PYG (dTiCam). SIFEN requires it whenever cMoneOpe != PYG.
+  tipoCambio: number | null;
   totalOpe: number;
   totalIva: number;
   iva5: number;
@@ -150,6 +152,7 @@ export function parseDte(xml: string): ParsedDte {
     receptorNombre: str(gRec.dNomRec),
     fechaEmision: parseDate(gGral.dFeEmiDE),
     moneda: str(gOpeCom.cMoneOpe) ?? 'PYG',
+    tipoCambio: gOpeCom.dTiCam === undefined ? null : num(gOpeCom.dTiCam) || null,
     totalOpe: num(tot.dTotGralOpe),
     totalIva: num(tot.dTotIVA),
     iva5: num(tot.dIVA5),

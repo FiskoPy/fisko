@@ -43,6 +43,7 @@ class FiscalSummary with _$FiscalSummary {
     @Default(0) double ivaCredito,
     @Default(0) double ivaDebito,
     @Default(0) double irpEstimado,
+    @Default(0) int sinConversion,
     @Default([]) List<MonthBucket> byMonth,
     @Default([]) List<CategoryBucket> byCategory,
   }) = _FiscalSummary;

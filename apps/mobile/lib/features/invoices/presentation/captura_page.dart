@@ -128,7 +128,7 @@ class _InvoiceTile extends StatelessWidget {
         '${tipoDocLabel(invoice.tipoDoc, invoice.tipoDocDesc)} · ${formatDate(invoice.fechaEmision)}',
       ),
       trailing: Text(
-        formatGs(invoice.totalOpe),
+        formatMoney(invoice.totalOpe, invoice.moneda),
         style: const TextStyle(fontWeight: FontWeight.bold),
       ),
       onTap: () => context.push('${AppRoutes.captura}/${invoice.id}'),

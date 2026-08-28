@@ -38,6 +38,9 @@ export interface FiscalSummary {
   ivaCredito: number; // IVA de compras
   ivaDebito: number; // IVA de ventas
   irpEstimado: number; // estimación simplificada
+  /// Invoices left OUT of the totals: a foreign currency with no usable rate.
+  /// Silently adding those to the guaraní totals produced a wrong tax figure.
+  sinConversion: number;
   byMonth: MonthBucket[];
   byCategory: CategoryBucket[];
 }
@@ -54,6 +57,8 @@ type Row = {
   baseGrav10: unknown;
   emisorRuc: string;
   emisorNombre: string;
+  moneda: string;
+  tipoCambio: unknown;
   items: { descripcion: string }[];
 };
 
@@ -83,6 +88,8 @@ export async function getSummary(userId: string, period: ReportPeriod): Promise<
       baseGrav10: true,
       emisorRuc: true,
       emisorNombre: true,
+      moneda: true,
+      tipoCambio: true,
       // Item descriptions feed the (rule-based) category derivation.
       items: { select: { descripcion: true } },
     },
@@ -101,18 +108,27 @@ export async function getSummary(userId: string, period: ReportPeriod): Promise<
     ivaCredito: 0,
     ivaDebito: 0,
   };
+  let sinConversion = 0;
   const months = new Map<string, MonthBucket>();
   const cats = new Map<CategoryKey, CategoryBucket>();
 
   for (const r of rows) {
-    const totalOpe = num(r.totalOpe);
-    const totalIva = num(r.totalIva);
+    // Everything below is in guaraníes. A foreign-currency invoice is converted
+    // with the rate the DTE itself carries (dTiCam); without a rate it is left
+    // out and counted, because adding USD to PYG is simply a wrong number.
+    const rate = r.moneda === 'PYG' ? 1 : num(r.tipoCambio);
+    if (!rate) {
+      sinConversion += 1;
+      continue;
+    }
+    const totalOpe = num(r.totalOpe) * rate;
+    const totalIva = num(r.totalIva) * rate;
     sum.totalOpe += totalOpe;
     sum.totalIva += totalIva;
-    sum.iva5 += num(r.iva5);
-    sum.iva10 += num(r.iva10);
-    sum.baseGrav5 += num(r.baseGrav5);
-    sum.baseGrav10 += num(r.baseGrav10);
+    sum.iva5 += num(r.iva5) * rate;
+    sum.iva10 += num(r.iva10) * rate;
+    sum.baseGrav5 += num(r.baseGrav5) * rate;
+    sum.baseGrav10 += num(r.baseGrav10) * rate;
 
     const isVenta = userRuc != null && normalizeRuc(r.emisorRuc) === userRuc;
     if (isVenta) {
@@ -155,7 +171,8 @@ export async function getSummary(userId: string, period: ReportPeriod): Promise<
       from: period.from ? period.from.toISOString() : null,
       to: period.to ? period.to.toISOString() : null,
     },
-    count: rows.length,
+    count: rows.length - sinConversion,
+    sinConversion,
     ...sum,
     irpEstimado,
     byMonth: [...months.values()].sort((a, b) => a.month.localeCompare(b.month)),
@@ -228,6 +245,13 @@ export async function buildPdf(summary: FiscalSummary): Promise<Buffer> {
     for (const m of summary.byMonth) {
       line(`${m.month} (${m.count})`, `${fmtGs(m.total)} · IVA ${fmtGs(m.iva)}`);
     }
+  }
+
+  if (summary.sinConversion > 0) {
+    doc.moveDown(0.6);
+    doc.fontSize(9).fillColor('#B8801F').text(
+      `${summary.sinConversion} comprobante(s) en moneda extranjera sin tipo de cambio quedaron fuera de estos totales.`,
+    );
   }
 
   doc.moveDown(1);

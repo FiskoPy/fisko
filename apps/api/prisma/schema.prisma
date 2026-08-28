@@ -69,6 +69,8 @@ model Invoice {
   receptorNombre String?
   fechaEmision   DateTime
   moneda         String   @default("PYG")
+  // dTiCam — exchange rate to PYG, present only when moneda != PYG.
+  tipoCambio     Decimal? @db.Decimal(18, 6)
   // Totais (gTotSub)
   totalOpe   Decimal @db.Decimal(18, 4) // dTotGralOpe
   totalIva   Decimal @db.Decimal(18, 4) // dTotIVA

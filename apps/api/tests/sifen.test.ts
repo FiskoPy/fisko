@@ -121,3 +121,31 @@ describe('CDC validation', () => {
     expect(isValidCdcCheckDigit(REAL_CDC)).toBe(dv === 8);
   });
 });
+
+describe('moneda y tipo de cambio', () => {
+  const withCurrency = (moneda: string, tiCam?: string) =>
+    DTE_XML.replace(
+      '<gOpeCom><cMoneOpe>PYG</cMoneOpe></gOpeCom>',
+      `<gOpeCom><cMoneOpe>${moneda}</cMoneOpe>${tiCam ? `<dTiCam>${tiCam}</dTiCam>` : ''}</gOpeCom>`,
+    );
+
+  it('reads the exchange rate a foreign-currency DTE carries', () => {
+    const dte = parseDte(withCurrency('USD', '7350.50'));
+    expect(dte.moneda).toBe('USD');
+    expect(dte.tipoCambio).toBe(7350.5);
+  });
+
+  it('leaves the rate null for guaraní invoices', () => {
+    const dte = parseDte(withCurrency('PYG'));
+    expect(dte.moneda).toBe('PYG');
+    expect(dte.tipoCambio).toBeNull();
+  });
+
+  it('leaves the rate null when a foreign DTE omits it', () => {
+    // The summary must then exclude the invoice rather than add dollars to
+    // guaraníes — which is exactly what produced a wrong total in production.
+    const dte = parseDte(withCurrency('USD'));
+    expect(dte.moneda).toBe('USD');
+    expect(dte.tipoCambio).toBeNull();
+  });
+});

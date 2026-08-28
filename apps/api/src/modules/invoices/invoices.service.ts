@@ -117,6 +117,7 @@ export async function importXml(
       receptorNombre: dte.receptorNombre,
       fechaEmision: dte.fechaEmision,
       moneda: dte.moneda,
+      tipoCambio: dte.tipoCambio,
       totalOpe: dte.totalOpe,
       totalIva: dte.totalIva,
       iva5: dte.iva5,

@@ -107,6 +107,31 @@ class _Dashboard extends StatelessWidget {
           const SizedBox(height: 12),
           _CategoryBreakdown(categories: s.byCategory),
         ],
+        if (s.sinConversion > 0) ...[
+          const SizedBox(height: 16),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.info_outline, size: 18, color: fisko.iva10),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      '${s.sinConversion} comprobante(s) en moneda extranjera sin tipo de '
+                      'cambio quedaron fuera de estos totales.',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Theme.of(context).colorScheme.outline,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
         const SizedBox(height: 20),
         Text(
           'El IRP se estima de forma simplificada. No constituye asesoría fiscal.',
