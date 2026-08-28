@@ -139,6 +139,32 @@ export async function refresh(input: RefreshInput): Promise<TokenPair> {
  * Always resolves without revealing whether the email exists (anti-enumeration).
  * When the user exists and has a password, a reset email is sent.
  */
+/** Creates a reset token for the user and returns the raw (unhashed) value. */
+async function mintResetToken(userId: string): Promise<string> {
+  const rawToken = randomBytes(32).toString('hex');
+  await prisma.passwordResetToken.create({
+    data: { userId, tokenHash: hashResetToken(rawToken), expiresAt: new Date(Date.now() + RESET_TOKEN_TTL_MS) },
+  });
+  return rawToken;
+}
+
+/**
+ * Operator path: mint a reset code and RETURN it instead of emailing it. Used
+ * by the admin router when no mail transport exists. Same token, same TTL,
+ * same hashing as the email flow, so resetPassword() needs no changes.
+ */
+export async function issuePasswordResetCode(
+  email: string,
+): Promise<{ code: string; expiresInMinutes: number }> {
+  const user = await prisma.user.findUnique({ where: { email } });
+  if (!user) throw AppError.notFound('No existe una cuenta con ese correo');
+  if (!user.passwordHash) {
+    throw AppError.badRequest('Esa cuenta entra con Google y no tiene contraseña que restablecer');
+  }
+  const code = await mintResetToken(user.id);
+  return { code, expiresInMinutes: RESET_TOKEN_TTL_MS / 60000 };
+}
+
 export async function forgotPassword(input: ForgotPasswordInput): Promise<void> {
   // Not an information leak: whether the *server* can send mail has nothing to
   // do with whether this address exists. Without this the endpoint answered
@@ -155,14 +181,7 @@ export async function forgotPassword(input: ForgotPasswordInput): Promise<void> 
     return;
   }
 
-  const rawToken = randomBytes(32).toString('hex');
-  await prisma.passwordResetToken.create({
-    data: {
-      userId: user.id,
-      tokenHash: hashResetToken(rawToken),
-      expiresAt: new Date(Date.now() + RESET_TOKEN_TTL_MS),
-    },
-  });
+  const rawToken = await mintResetToken(user.id);
 
   // Fire-and-forget: email delivery must not block the HTTP response nor leak
   // existence via timing/failures. Errors are logged, never surfaced.

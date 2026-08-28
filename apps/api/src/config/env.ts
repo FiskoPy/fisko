@@ -33,6 +33,10 @@ const envSchema = z.object({
   // Passphrase used to encrypt e-mail app passwords / tokens at rest (2C email
   // capture). Required only to use the e-mail capture feature; >=16 chars.
   EMAIL_CRYPTO_KEY: z.string().min(16).optional(),
+
+  // Enables the operator-only /api/v1/admin routes (manual password reset
+  // codes while no mail transport exists). Unset in production once Brevo works.
+  ADMIN_TOKEN: z.string().min(32).optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);

@@ -3,6 +3,8 @@ import { authRouter } from './modules/auth/auth.routes';
 import { invoicesRouter } from './modules/invoices/invoices.routes';
 import { reportsRouter } from './modules/reports/reports.routes';
 import { emailRouter } from './modules/email/email.routes';
+import { adminRouter } from './modules/admin/admin.routes';
+import { env } from './config/env';
 
 /** Aggregates all /api/v1 routes. */
 export const apiRouter = Router();
@@ -15,3 +17,6 @@ apiRouter.use('/auth', authRouter);
 apiRouter.use('/invoices', invoicesRouter);
 apiRouter.use('/reports', reportsRouter);
 apiRouter.use('/email', emailRouter);
+
+// Operator-only; absent entirely unless ADMIN_TOKEN is configured.
+if (env.ADMIN_TOKEN) apiRouter.use('/admin', adminRouter);
