@@ -50,3 +50,22 @@ export const authLimiter = rateLimit({
     (m) => `Demasiados intentos desde esta conexión. Esperá ${m} minuto(s) y probá de nuevo.`,
   ),
 });
+
+/**
+ * Per-user cap on photo OCR. Cloud Vision only exposes per-minute quotas and a
+ * global one at that, so a single user could burn the whole billing account in
+ * an afternoon. This is the control that actually knows who is calling.
+ *
+ * Counts every attempt, not just successful imports: a stream of unreadable
+ * photos costs the same at Google as a stream of good ones.
+ */
+export const ocrLimiter = rateLimit({
+  windowMs: 24 * 60 * 60 * 1000,
+  limit: 30,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  keyGenerator: (req) => (req as { user?: { sub?: string } }).user?.sub ?? req.ip ?? "anon",
+  handler: limitHandler(
+    () => "Llegaste al límite diario de fotos. Probá de nuevo mañana o importá el XML.",
+  ),
+});

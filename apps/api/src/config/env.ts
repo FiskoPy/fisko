@@ -34,6 +34,10 @@ const envSchema = z.object({
   // projection degrades to plain arithmetic when it is absent.
   OPENAI_API_KEY: z.string().optional(),
 
+  // Marco 2 phase 2D. An API key rather than a service-account JSON: the
+  // client org enforces iam.disableServiceAccountKeyCreation.
+  GOOGLE_VISION_API_KEY: z.string().optional(),
+
   // Passphrase used to encrypt e-mail app passwords / tokens at rest (2C email
   // capture). Required only to use the e-mail capture feature; >=16 chars.
   EMAIL_CRYPTO_KEY: z.string().min(16).optional(),

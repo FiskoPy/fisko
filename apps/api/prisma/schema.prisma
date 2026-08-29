@@ -79,6 +79,10 @@ model Invoice {
   baseGrav5  Decimal @db.Decimal(18, 4) // dBaseGrav5
   baseGrav10 Decimal @db.Decimal(18, 4) // dBaseGrav10
   // Notas de crédito/débito referenciam o CDC original
+  // Paper invoices (source=ocr) have no CDC: cdc holds a synthetic key and
+  // these two carry what the form actually prints.
+  timbrado    String?
+  numeroDoc   String?
   originalCdc String?
   source      String   @default("manual") // manual | email | ocr
   xmlRaw      String?

@@ -1,7 +1,7 @@
 import type { Request, Response } from 'express';
 import type { AuthedRequest } from '../../middleware/auth';
 import { AppError } from '../../errors/app-error';
-import { importXmlSchema, listInvoicesQuerySchema } from './invoices.schemas';
+import { importPhotoSchema, importXmlSchema, listInvoicesQuerySchema } from './invoices.schemas';
 import * as invoicesService from './invoices.service';
 
 function userId(req: AuthedRequest): string {
@@ -13,6 +13,12 @@ export async function importXml(req: AuthedRequest, res: Response): Promise<void
   const { xml } = importXmlSchema.parse(req.body);
   const invoice = await invoicesService.importXml(userId(req), xml);
   res.status(201).json({ invoice });
+}
+
+export async function importPhoto(req: AuthedRequest, res: Response): Promise<void> {
+  const { imageBase64 } = importPhotoSchema.parse(req.body);
+  const out = await invoicesService.importPhoto(userId(req), imageBase64);
+  res.status(201).json(out);
 }
 
 export async function list(req: AuthedRequest, res: Response): Promise<void> {

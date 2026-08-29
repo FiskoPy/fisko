@@ -16,6 +16,19 @@ export const notFoundHandler: RequestHandler = (_req, res) => {
  */
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 export const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
+  // body-parser rejects an oversized payload with its own error shape; without
+  // this it surfaced as a bare 500 "Internal server error".
+  const asPayload = err as { type?: string; status?: number };
+  if (asPayload?.type === 'entity.too.large') {
+    res.status(413).json({
+      error: {
+        code: 'PAYLOAD_TOO_LARGE',
+        message: 'El archivo es demasiado grande. Probá con una foto más liviana.',
+      },
+    });
+    return;
+  }
+
   if (err instanceof AppError) {
     res.status(err.status).json({
       error: { code: err.code, message: err.message, details: err.details },

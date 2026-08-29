@@ -2,6 +2,8 @@ import type { Invoice, InvoiceItem, Prisma } from '@prisma/client';
 import { prisma } from '../../lib/prisma';
 import { AppError } from '../../errors/app-error';
 import { parseDte, isValidCdcCheckDigit } from '../../services/sifen';
+import { extractText, MAX_IMAGE_BYTES } from '../../services/ocr';
+import { parseReceipt, receiptKey, type ParsedReceipt } from '../../services/receipt-parser';
 
 type InvoiceWithItems = Invoice & { items: InvoiceItem[] };
 
@@ -193,4 +195,81 @@ export async function getInvoice(userId: string, id: string): Promise<PublicInvo
 export async function deleteInvoice(userId: string, id: string): Promise<void> {
   const res = await prisma.invoice.deleteMany({ where: { id, userId } });
   if (res.count === 0) throw AppError.notFound('Factura no encontrada');
+}
+
+
+export interface ImportPhotoResult {
+  invoice: Awaited<ReturnType<typeof importXml>>;
+  /** Fields the OCR could not read — the app asks the user to complete them. */
+  missing: string[];
+  confidence: number;
+}
+
+/**
+ * Marco 2 phase 2D — import a photographed paper invoice (talonario).
+ *
+ * A paper invoice has no CDC, so `cdc` holds a synthetic key derived from
+ * issuer + document number + date + total: photographing the same invoice
+ * twice deduplicates instead of creating a second record. What the form
+ * actually prints goes into timbrado/numeroDoc.
+ *
+ * Anything the OCR could not read is reported in `missing` rather than
+ * guessed. A wrong figure on a tax record is worse than an absent one.
+ */
+export async function importPhoto(userId: string, imageBase64: string) {
+  const bytes = Math.floor((imageBase64.length * 3) / 4);
+  if (bytes > MAX_IMAGE_BYTES) {
+    throw AppError.badRequest(
+      'La foto es demasiado grande. Sacala de nuevo o reducí la calidad.',
+    );
+  }
+
+  const text = await extractText(imageBase64);
+  const parsed: ParsedReceipt = parseReceipt(text);
+
+  if (parsed.total == null) {
+    throw AppError.badRequest(
+      'No pudimos leer el total de la factura. Sacá la foto más de cerca, ' +
+        'con buena luz y la factura plana sobre una superficie oscura.',
+    );
+  }
+
+  const key = receiptKey(parsed);
+  const existing = await prisma.invoice.findUnique({
+    where: { userId_cdc: { userId, cdc: key } },
+  });
+  if (existing) throw AppError.conflict('Esta factura ya fue importada');
+
+  const iva10 = parsed.iva10 ?? 0;
+  const iva5 = parsed.iva5 ?? 0;
+
+  const invoice = await prisma.invoice.create({
+    data: {
+      userId,
+      cdc: key,
+      tipoDoc: 1, // Factura
+      tipoDocDesc: 'Factura (papel)',
+      emisorRuc: parsed.emisorRuc ?? '',
+      emisorDv: parsed.emisorDv,
+      emisorNombre: parsed.emisorNombre ?? 'Sin identificar',
+      receptorRuc: parsed.receptorRuc,
+      receptorNombre: parsed.receptorNombre,
+      fechaEmision: parsed.fechaEmision ?? new Date(),
+      moneda: 'PYG',
+      timbrado: parsed.timbrado,
+      numeroDoc: parsed.numeroDoc,
+      totalOpe: parsed.total,
+      totalIva: iva10 + iva5,
+      iva5,
+      iva10,
+      // The form prints the IVA, not the taxable base; derive it so the
+      // dashboard's 5/10 split stays consistent with electronic invoices.
+      baseGrav5: iva5 > 0 ? iva5 * 20 : 0,
+      baseGrav10: iva10 > 0 ? iva10 * 10 : 0,
+      source: 'ocr',
+    },
+    include: { items: true },
+  });
+
+  return { invoice, missing: parsed.missing, confidence: parsed.confidence };
 }
