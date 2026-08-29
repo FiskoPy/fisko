@@ -30,6 +30,10 @@ const envSchema = z.object({
   // IPs is often blocked/timed-out. When set, the mailer sends via the Brevo API.
   BREVO_API_KEY: z.string().optional(),
 
+  // Marco 2 phase 2E. Optional: the fiscal rules run without it and the IVA
+  // projection degrades to plain arithmetic when it is absent.
+  OPENAI_API_KEY: z.string().optional(),
+
   // Passphrase used to encrypt e-mail app passwords / tokens at rest (2C email
   // capture). Required only to use the e-mail capture feature; >=16 chars.
   EMAIL_CRYPTO_KEY: z.string().min(16).optional(),
