@@ -81,17 +81,17 @@ class _Detail extends StatelessWidget {
         if (inv.receptorNombre != null) _row('Receptor', inv.receptorNombre!),
         _row('CDC', inv.cdc, mono: true),
         const Divider(height: 24),
-        _row('Base gravada 5%', formatGs(inv.baseGrav5)),
-        _row('IVA 5%', formatGs(inv.iva5)),
-        _row('Base gravada 10%', formatGs(inv.baseGrav10)),
-        _row('IVA 10%', formatGs(inv.iva10)),
-        _row('Total IVA', formatGs(inv.totalIva)),
+        _row('Base gravada 5%', formatMoney(inv.baseGrav5, inv.moneda)),
+        _row('IVA 5%', formatMoney(inv.iva5, inv.moneda)),
+        _row('Base gravada 10%', formatMoney(inv.baseGrav10, inv.moneda)),
+        _row('IVA 10%', formatMoney(inv.iva10, inv.moneda)),
+        _row('Total IVA', formatMoney(inv.totalIva, inv.moneda)),
         const SizedBox(height: 8),
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             const Text('TOTAL', style: TextStyle(fontWeight: FontWeight.bold)),
-            Text(formatGs(inv.totalOpe),
+            Text(formatMoney(inv.totalOpe, inv.moneda),
                 style: Theme.of(context).textTheme.titleLarge?.copyWith(
                       color: Theme.of(context).colorScheme.primary,
                       fontWeight: FontWeight.bold,
@@ -102,7 +102,7 @@ class _Detail extends StatelessWidget {
         Text('Ítems (${inv.items?.length ?? 0})',
             style: Theme.of(context).textTheme.titleMedium),
         const SizedBox(height: 8),
-        ...?inv.items?.map((it) => _ItemTile(item: it)),
+        ...?inv.items?.map((it) => _ItemTile(item: it, moneda: inv.moneda)),
       ],
     );
   }
@@ -127,9 +127,13 @@ class _Detail extends StatelessWidget {
 }
 
 class _ItemTile extends StatelessWidget {
-  const _ItemTile({required this.item});
+  const _ItemTile({required this.item, required this.moneda});
 
   final InvoiceItem item;
+
+  /// Items are priced in the invoice currency; rendering them as guaraníes
+  /// made a USD line look ~7000x cheaper than it is.
+  final String moneda;
 
   @override
   Widget build(BuildContext context) {
@@ -139,9 +143,9 @@ class _ItemTile extends StatelessWidget {
       title: Text(item.descripcion, maxLines: 2, overflow: TextOverflow.ellipsis),
       subtitle: Text(
         '${item.cantidad.toStringAsFixed(item.cantidad % 1 == 0 ? 0 : 3)} × '
-        '${formatGs(item.precioUnit)} · IVA ${item.ivaRate}%',
+        '${formatMoney(item.precioUnit, moneda)} · IVA ${item.ivaRate}%',
       ),
-      trailing: Text(formatGs(item.total)),
+      trailing: Text(formatMoney(item.total, moneda)),
     );
   }
 }
