@@ -29,6 +29,7 @@ model User {
   resetTokens      PasswordResetToken[]
   invoices         Invoice[]
   emailConnections EmailConnection[]
+  subscription Subscription?
 }
 
 // Caixa de e-mail conectada para captura automática de DTE (XML em anexos).
@@ -121,4 +122,29 @@ model PasswordResetToken {
   createdAt DateTime  @default(now())
 
   @@index([userId])
+}
+
+/// Marco 2 phase 2F. One row per user; the free plan is implicit when absent.
+model Subscription {
+  id     String @id @default(uuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  planId String // gratis | basico | pro | empresarial
+  status String @default("pending") // pending | active | expired | cancelled
+
+  /// Pagopar order identifiers. hashPedido is what the webhook echoes back.
+  pedidoId   String? @unique
+  hashPedido String?
+
+  priceGs     Int?
+  /// When the current paid period ends; null while pending.
+  currentPeriodEnd DateTime?
+  lastPaymentAt    DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([hashPedido])
 }

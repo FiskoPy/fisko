@@ -38,6 +38,11 @@ const envSchema = z.object({
   // client org enforces iam.disableServiceAccountKeyCreation.
   GOOGLE_VISION_API_KEY: z.string().optional(),
 
+  // Marco 2 phase 2F. Optional: without them the subscription routes answer
+  // 503 instead of the server refusing to boot.
+  PAGOPAR_PUBLIC_TOKEN: z.string().optional(),
+  PAGOPAR_PRIVATE_TOKEN: z.string().optional(),
+
   // Passphrase used to encrypt e-mail app passwords / tokens at rest (2C email
   // capture). Required only to use the e-mail capture feature; >=16 chars.
   EMAIL_CRYPTO_KEY: z.string().min(16).optional(),
