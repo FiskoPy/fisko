@@ -8,6 +8,7 @@ import '../../core/config/constants.dart';
 import '../../core/config/env.dart';
 import '../../l10n/generated/app_localizations.dart';
 import '../auth/application/auth_controller.dart';
+import '../auth/domain/ruc_validator.dart';
 import '../subscriptions/data/subscription_api.dart';
 
 class PerfilPage extends ConsumerWidget {
@@ -25,6 +26,85 @@ class PerfilPage extends ConsumerWidget {
 
   /// Two-step confirmation: deleting is irreversible and cascades to every
   /// invoice and mailbox credential, so a single tap must not be enough.
+  /// Asks for the RUC and its check digit, validating the digit locally so an
+  /// obvious typo never costs a round trip.
+  Future<void> _editRuc(
+    BuildContext context,
+    WidgetRef ref,
+    String? currentRuc,
+    int? currentDv,
+  ) async {
+    final rucCtrl = TextEditingController(text: currentRuc ?? '');
+    final dvCtrl = TextEditingController(text: currentDv?.toString() ?? '');
+    final formKey = GlobalKey<FormState>();
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Tu RUC'),
+        content: Form(
+          key: formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'Lo usamos para separar tus ventas de tus compras. '
+                'Cargá el número sin el dígito verificador, y el dígito aparte.',
+                style: TextStyle(fontSize: 13),
+              ),
+              const SizedBox(height: 14),
+              TextFormField(
+                controller: rucCtrl,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'RUC', hintText: '80175384'),
+                validator: (v) {
+                  final r = RucValidator.normalize(v ?? '');
+                  if (r.length < 3) return 'Ingresá tu RUC';
+                  return null;
+                },
+              ),
+              const SizedBox(height: 10),
+              TextFormField(
+                controller: dvCtrl,
+                keyboardType: TextInputType.number,
+                maxLength: 1,
+                decoration: const InputDecoration(
+                  labelText: 'Dígito verificador',
+                  hintText: '8',
+                  counterText: '',
+                ),
+                validator: (v) {
+                  final dv = int.tryParse((v ?? '').trim());
+                  if (dv == null) return 'Ingresá el dígito';
+                  final r = RucValidator.normalize(rucCtrl.text);
+                  if (r.length >= 3 && !RucValidator.isValid(r, dv)) {
+                    return 'No corresponde a ese RUC';
+                  }
+                  return null;
+                },
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
+          FilledButton(
+            onPressed: () {
+              if (formKey.currentState?.validate() ?? false) Navigator.pop(ctx, true);
+            },
+            child: const Text('Guardar'),
+          ),
+        ],
+      ),
+    );
+
+    if (ok != true) return;
+    await ref.read(authControllerProvider.notifier).setRuc(
+          ruc: RucValidator.normalize(rucCtrl.text),
+          rucDv: int.parse(dvCtrl.text.trim()),
+        );
+  }
+
   Future<void> _confirmDelete(BuildContext context, WidgetRef ref) async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -91,12 +171,24 @@ class PerfilPage extends ConsumerWidget {
               title: Text(user.name),
               subtitle: Text(user.email),
             ),
-            if (user.ruc != null)
-              ListTile(
-                leading: const Icon(Icons.badge_outlined),
-                title: Text(l10n.ruc),
-                subtitle: Text('${user.ruc}-${user.rucDv ?? ''}'),
+            // Always shown. It used to appear only when a RUC existed, so a
+            // user who skipped it at sign-up had no way back — and without a
+            // RUC the server counts every invoice as a purchase.
+            ListTile(
+              leading: Icon(
+                Icons.badge_outlined,
+                color: user.ruc == null ? scheme.error : null,
               ),
+              title: Text(l10n.ruc),
+              subtitle: Text(
+                user.ruc != null
+                    ? '${user.ruc}-${user.rucDv ?? ''}'
+                    : 'Sin cargar — tus ventas no se separan de tus compras',
+                style: user.ruc == null ? TextStyle(color: scheme.error) : null,
+              ),
+              trailing: const Icon(Icons.edit_outlined, size: 18),
+              onTap: busy ? null : () => _editRuc(context, ref, user.ruc, user.rucDv),
+            ),
             const Divider(),
           ],
           ListTile(

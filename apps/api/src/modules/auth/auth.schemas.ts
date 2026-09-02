@@ -17,6 +17,19 @@ export const registerSchema = z.object({
   rucDv: z.coerce.number().int().min(0).max(9).optional(),
 });
 
+/**
+ * Setting the RUC after registration.
+ *
+ * It is optional at sign-up, but a user without one has every invoice counted
+ * as a purchase (getSummary decides ventas vs compras by comparing the
+ * emisor's RUC with the user's), so ventas and IVA débito stay at zero for
+ * good. There was no way to add it later; this is that way.
+ */
+export const updateProfileSchema = z.object({
+  ruc: z.string().trim().regex(/^\d{3,12}$/, 'El RUC debe tener sólo dígitos'),
+  rucDv: z.coerce.number().int().min(0).max(9),
+});
+
 export const loginSchema = z.object({
   email,
   password: z.string().min(1),
@@ -45,3 +58,5 @@ export type GoogleInput = z.infer<typeof googleSchema>;
 export type RefreshInput = z.infer<typeof refreshSchema>;
 export type ForgotPasswordInput = z.infer<typeof forgotPasswordSchema>;
 export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
+
+export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;

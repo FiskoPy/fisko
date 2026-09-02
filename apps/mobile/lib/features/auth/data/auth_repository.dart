@@ -50,6 +50,10 @@ class AuthRepository {
     });
   }
 
+  Future<AuthUser> updateRuc({required String ruc, required int rucDv}) {
+    return _run(() => _api.updateRuc(ruc: ruc, rucDv: rucDv));
+  }
+
   Future<void> forgotPassword({required String email}) {
     return _run(() => _api.forgotPassword(email: email));
   }

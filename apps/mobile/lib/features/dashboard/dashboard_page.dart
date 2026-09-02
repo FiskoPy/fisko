@@ -7,6 +7,7 @@ import '../../core/format.dart';
 import '../../core/theme/app_theme.dart';
 import '../reports/application/summary_controller.dart';
 import '../insights/insights_api.dart';
+import 'first_run.dart';
 import '../insights/insights_section.dart';
 import '../reports/data/models/summary_models.dart';
 
@@ -35,22 +36,12 @@ class DashboardPage extends ConsumerWidget {
               ),
             ],
           ),
-          data: (s) => s.count == 0 ? _empty() : _Dashboard(summary: s),
+          data: (s) => s.count == 0 ? const FirstRunView() : _Dashboard(summary: s),
         ),
       ),
     );
   }
 
-  Widget _empty() => ListView(
-        children: const [
-          SizedBox(height: 140),
-          Icon(Icons.insights_outlined, size: 64),
-          SizedBox(height: 12),
-          Center(child: Text('Sin datos todavía')),
-          SizedBox(height: 4),
-          Center(child: Text('Importá facturas en la pestaña Captura.')),
-        ],
-      );
 }
 
 class _Dashboard extends StatelessWidget {

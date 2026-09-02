@@ -15,5 +15,6 @@ authRouter.post('/forgot-password', authLimiter, asyncHandler(authController.for
 authRouter.post('/reset-password', authLimiter, asyncHandler(authController.resetPassword));
 
 authRouter.get('/me', requireAuth, asyncHandler(authController.me));
+authRouter.patch('/me', requireAuth, asyncHandler(authController.updateMe));
 authRouter.post('/logout', requireAuth, asyncHandler(authController.logout));
 authRouter.delete('/me', requireAuth, asyncHandler(authController.deleteMe));

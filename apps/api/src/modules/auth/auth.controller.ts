@@ -9,6 +9,7 @@ import {
   refreshSchema,
   registerSchema,
   resetPasswordSchema,
+  updateProfileSchema,
 } from './auth.schemas';
 import * as authService from './auth.service';
 
@@ -52,6 +53,13 @@ export async function resetPassword(req: Request, res: Response): Promise<void> 
 export async function me(req: AuthedRequest, res: Response): Promise<void> {
   if (!req.user) throw AppError.unauthorized();
   const user = await authService.getMe(req.user.sub);
+  res.status(200).json({ user });
+}
+
+export async function updateMe(req: AuthedRequest, res: Response): Promise<void> {
+  if (!req.user) throw AppError.unauthorized();
+  const input = updateProfileSchema.parse(req.body);
+  const user = await authService.updateProfile(req.user.sub, input);
   res.status(200).json({ user });
 }
 

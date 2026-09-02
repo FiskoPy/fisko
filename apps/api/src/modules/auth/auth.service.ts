@@ -14,6 +14,7 @@ import type {
   LoginInput,
   RefreshInput,
   RegisterInput,
+  UpdateProfileInput,
   ResetPasswordInput,
 } from './auth.schemas';
 
@@ -27,6 +28,22 @@ export interface PublicUser {
   rucDv: number | null;
   emailVerified: boolean;
   createdAt: Date;
+}
+
+/**
+ * The check digit must match, and it is checked in one place so the register
+ * and the "add my RUC later" paths can never disagree. In Spanish: the app
+ * shows these verbatim.
+ */
+function assertValidRuc(ruc: string, dv: number | undefined): asserts dv is number {
+  if (dv === undefined) {
+    throw AppError.badRequest('Falta el dígito verificador del RUC.');
+  }
+  if (!isValidRucDv(ruc, dv)) {
+    throw AppError.badRequest(
+      'El dígito verificador no corresponde a ese RUC. Revisá el número.',
+    );
+  }
 }
 
 export function toPublicUser(user: User): PublicUser {
@@ -53,12 +70,7 @@ function hashResetToken(token: string): string {
 export async function register(input: RegisterInput): Promise<AuthResult> {
   // RUC validation: if a RUC is provided, its check digit must be present and valid.
   if (input.ruc) {
-    if (input.rucDv === undefined) {
-      throw AppError.badRequest('rucDv is required when ruc is provided');
-    }
-    if (!isValidRucDv(input.ruc, input.rucDv)) {
-      throw AppError.badRequest('Invalid RUC check digit (dDVEmi)');
-    }
+    assertValidRuc(input.ruc, input.rucDv);
   }
 
   const existing = await prisma.user.findUnique({ where: { email: input.email } });
@@ -247,6 +259,19 @@ export async function getMe(userId: string): Promise<PublicUser> {
   if (!user) {
     throw AppError.notFound('User not found');
   }
+  return toPublicUser(user);
+}
+
+/** Sets (or corrects) the taxpayer's RUC after registration. */
+export async function updateProfile(
+  userId: string,
+  input: UpdateProfileInput,
+): Promise<PublicUser> {
+  assertValidRuc(input.ruc, input.rucDv);
+  const user = await prisma.user.update({
+    where: { id: userId },
+    data: { ruc: input.ruc, rucDv: input.rucDv },
+  });
   return toPublicUser(user);
 }
 

@@ -57,6 +57,27 @@ class AuthController extends Notifier<AuthState> {
     }
   }
 
+  /// Adds the RUC to an account registered without one. The ventas/compras
+  /// split is derived from it server-side, so every cached total is stale
+  /// afterwards.
+  Future<bool> setRuc({required String ruc, required int rucDv}) async {
+    state = state.copyWith(isSubmitting: true, clearMessages: true);
+    try {
+      final user = await _repo.updateRuc(ruc: ruc, rucDv: rucDv);
+      state = state.copyWith(
+        isSubmitting: false,
+        user: user,
+        infoMessage: 'RUC guardado.',
+      );
+      ref.invalidate(fiscalSummaryProvider);
+      ref.invalidate(insightsProvider);
+      return true;
+    } on Failure catch (f) {
+      state = state.copyWith(isSubmitting: false, errorMessage: f.message);
+      return false;
+    }
+  }
+
   Future<bool> login({required String email, required String password}) {
     return _submit(() async {
       final user = await _repo.login(email: email, password: password);

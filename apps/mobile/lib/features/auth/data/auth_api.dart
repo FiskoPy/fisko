@@ -59,6 +59,16 @@ class AuthApi {
     return AuthUser.fromJson(res.data!['user'] as Map<String, dynamic>);
   }
 
+  /// Sets the taxpayer's RUC after registration. Without one the server counts
+  /// every invoice as a purchase, so ventas and IVA débito stay at zero.
+  Future<AuthUser> updateRuc({required String ruc, required int rucDv}) async {
+    final res = await _dio.patch<Map<String, dynamic>>(
+      '/auth/me',
+      data: {'ruc': ruc, 'rucDv': rucDv},
+    );
+    return AuthUser.fromJson(res.data!['user'] as Map<String, dynamic>);
+  }
+
   Future<void> logout() async {
     await _dio.post<Map<String, dynamic>>('/auth/logout');
   }
