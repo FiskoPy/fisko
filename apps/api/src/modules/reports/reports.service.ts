@@ -48,6 +48,7 @@ export interface FiscalSummary {
 const num = (d: unknown): number => (d == null ? 0 : Number(d));
 
 type Row = {
+  tipoDoc: number;
   fechaEmision: Date;
   totalOpe: unknown;
   totalIva: unknown;
@@ -61,6 +62,18 @@ type Row = {
   tipoCambio: unknown;
   items: { descripcion: string }[];
 };
+
+/**
+ * How a SIFEN document type counts towards totals (iTiDE).
+ *  1 Factura, 2/3 Factura de exportación/importación, 4 Autofactura, 6 Nota de
+ *  débito → +1. 5 Nota de crédito → −1. 7 Nota de remisión and 8 Comprobante de
+ *  retención carry no operation of their own → 0 (left out).
+ */
+export function documentSign(tipoDoc: number): 1 | -1 | 0 {
+  if (tipoDoc === 5) return -1;
+  if (tipoDoc === 7 || tipoDoc === 8) return 0;
+  return 1;
+}
 
 export async function getSummary(userId: string, period: ReportPeriod): Promise<FiscalSummary> {
   const user = await prisma.user.findUnique({ where: { id: userId }, select: { ruc: true } });
@@ -79,6 +92,7 @@ export async function getSummary(userId: string, period: ReportPeriod): Promise<
         : {}),
     },
     select: {
+      tipoDoc: true,
       fechaEmision: true,
       totalOpe: true,
       totalIva: true,
@@ -121,14 +135,19 @@ export async function getSummary(userId: string, period: ReportPeriod): Promise<
       sinConversion += 1;
       continue;
     }
-    const totalOpe = num(r.totalOpe) * rate;
-    const totalIva = num(r.totalIva) * rate;
+    // A credit note reverses an operation; it used to be added like an invoice,
+    // so a refund INCREASED compras and IVA crédito.
+    const sign = documentSign(r.tipoDoc);
+    if (sign === 0) continue;
+    const k = rate * sign;
+    const totalOpe = num(r.totalOpe) * k;
+    const totalIva = num(r.totalIva) * k;
     sum.totalOpe += totalOpe;
     sum.totalIva += totalIva;
-    sum.iva5 += num(r.iva5) * rate;
-    sum.iva10 += num(r.iva10) * rate;
-    sum.baseGrav5 += num(r.baseGrav5) * rate;
-    sum.baseGrav10 += num(r.baseGrav10) * rate;
+    sum.iva5 += num(r.iva5) * k;
+    sum.iva10 += num(r.iva10) * k;
+    sum.baseGrav5 += num(r.baseGrav5) * k;
+    sum.baseGrav10 += num(r.baseGrav10) * k;
 
     const isVenta = userRuc != null && normalizeRuc(r.emisorRuc) === userRuc;
     if (isVenta) {

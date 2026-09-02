@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../insights/insights_api.dart';
 
 import '../../../core/errors/failures.dart';
 import '../../../core/network/dio_client.dart';
@@ -115,6 +116,7 @@ class AuthController extends Notifier<AuthState> {
   void _clearAccountCaches() {
     ref.invalidate(invoicesControllerProvider);
     ref.invalidate(fiscalSummaryProvider);
+    ref.invalidate(insightsProvider);
     ref.invalidate(emailConnectionsProvider);
   }
 

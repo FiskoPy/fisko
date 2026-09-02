@@ -25,10 +25,13 @@ insightsRouter.get(
 
     const [summary, latest, recent] = await Promise.all([
       getSummary(user.sub, {}),
+      // When the newest invoice ENTERED Fisko, not its emission date: the nudge
+      // says "hace N días que no entra una factura", and a February invoice
+      // imported today used to make it say 199 days one second after import.
       prisma.invoice.findFirst({
         where: { userId: user.sub },
-        orderBy: { fechaEmision: 'desc' },
-        select: { fechaEmision: true },
+        orderBy: { createdAt: 'desc' },
+        select: { createdAt: true },
       }),
       prisma.invoice.findMany({
         where: { userId: user.sub, createdAt: { gte: since } },
@@ -49,7 +52,7 @@ insightsRouter.get(
 
     const insights = buildInsights({
       summary,
-      lastInvoiceAt: latest?.fechaEmision ?? null,
+      lastInvoiceAt: latest?.createdAt ?? null,
       recentCount,
       recentTotal,
       now,

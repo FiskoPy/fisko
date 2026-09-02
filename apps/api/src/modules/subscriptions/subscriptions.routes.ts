@@ -56,42 +56,46 @@ subscriptionsRouter.post(
     const sub = await prisma.subscription.findFirst({ where: { hashPedido } });
     if (!sub) {
       logger.warn({ hashPedido }, 'pagopar webhook: no subscription for this order');
-      res.status(200).json({ ok: true });
+      res.status(200).json(req.body);
       return;
     }
 
     if (!isPaid) {
       logger.info({ hashPedido, userId: sub.userId }, 'pagopar webhook: not paid yet');
-      res.status(200).json({ ok: true });
+      res.status(200).json(req.body);
       return;
     }
 
-    // One paid month from now. Re-notifications for an order already credited
-    // must not stack another month, so ignore a repeat.
-    if (sub.status === 'active' && sub.lastPaymentAt) {
+    // Pagopar re-notifies every 10 minutes until it sees a 200, so the same
+    // order can arrive more than once. Key the guard on the order itself —
+    // keying on status ignored a paid upgrade as if it were a repeat.
+    if (sub.paidHashPedido === hashPedido) {
       logger.info({ hashPedido }, 'pagopar webhook: already credited, ignoring repeat');
-      res.status(200).json({ ok: true });
+      res.status(200).json(req.body);
       return;
     }
 
+    // One paid month from now, on the plan this order was for.
     const now = new Date();
     const periodEnd = new Date(now);
     periodEnd.setUTCMonth(periodEnd.getUTCMonth() + 1);
+    const planId = sub.pendingPlanId ?? sub.planId;
 
     await prisma.subscription.update({
       where: { id: sub.id },
       data: {
+        planId,
+        pendingPlanId: null,
         status: 'active',
         lastPaymentAt: now,
         currentPeriodEnd: periodEnd,
+        paidHashPedido: hashPedido,
       },
     });
 
-    logger.info(
-      { userId: sub.userId, planId: sub.planId, hashPedido },
-      'subscription activated',
-    );
-    res.status(200).json({ ok: true });
+    logger.info({ userId: sub.userId, planId, hashPedido }, 'subscription activated');
+    // Pagopar asks merchants to answer with the payload it sent.
+    res.status(200).json(req.body);
   }),
 );
 
@@ -161,23 +165,21 @@ subscriptionsRouter.post(
       maxPaymentDate,
     });
 
+    // A paying user who starts an upgrade — or opens a checkout and closes
+    // it — keeps what they paid for until the new payment is confirmed. Only
+    // a user with nothing active is moved to 'pending'.
+    const existing = await prisma.subscription.findUnique({ where: { userId: dbUser.id } });
+    const keepActive = resolveActive(existing).active;
+    const order = {
+      pendingPlanId: plan.id,
+      pedidoId: idPedido,
+      hashPedido: checkout.hashPedido,
+      priceGs: plan.priceGs,
+    };
     await prisma.subscription.upsert({
       where: { userId: dbUser.id },
-      create: {
-        userId: dbUser.id,
-        planId: plan.id,
-        status: 'pending',
-        pedidoId: idPedido,
-        hashPedido: checkout.hashPedido,
-        priceGs: plan.priceGs,
-      },
-      update: {
-        planId: plan.id,
-        status: 'pending',
-        pedidoId: idPedido,
-        hashPedido: checkout.hashPedido,
-        priceGs: plan.priceGs,
-      },
+      create: { userId: dbUser.id, planId: plan.id, status: 'pending', ...order },
+      update: keepActive ? order : { planId: plan.id, status: 'pending', ...order },
     });
 
     res.status(201).json({ redirectUrl: checkout.redirectUrl, planId: plan.id });

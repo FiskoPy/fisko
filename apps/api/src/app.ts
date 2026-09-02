@@ -18,8 +18,31 @@ export function createApp(): Express {
   app.disable('x-powered-by');
   app.use(helmet());
   app.use(cors());
-  app.use(express.json({ limit: '100kb' }));
-  app.use(pinoHttp({ logger }));
+  // Photos go through the route-scoped 12mb parser on /invoices/import-photo.
+// If this global parser ran first it would consume the body and reject any
+// real photo (>100kb) with 413 before that route was ever reached — which is
+// exactly what happened. The 1mb ceiling covers a SIFEN DTE with many items,
+// which can pass 100kb.
+const PHOTO_ROUTE = '/api/v1/invoices/import-photo';
+app.use(
+  express.json({
+    limit: '1mb',
+    type: (req) =>
+      (req.url ?? '').split('?')[0] !== PHOTO_ROUTE &&
+      /json/i.test(String(req.headers['content-type'] ?? '')),
+  }),
+);
+  app.use(
+  pinoHttp({
+    logger,
+    // pino-http's default req serializer logs every header, which was writing
+    // Bearer access tokens and the admin token into Render's log stream.
+    redact: {
+      paths: ['req.headers.authorization', 'req.headers["x-admin-token"]', 'req.headers.cookie'],
+      censor: '[redacted]',
+    },
+  }),
+);
   app.use(apiLimiter);
 
   // All routes live under /api/v1.

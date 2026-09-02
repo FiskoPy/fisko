@@ -31,7 +31,7 @@ export interface Insight {
 
 export interface InsightInput {
   summary: FiscalSummary;
-  /** Newest invoice date the user has, or null when they have none. */
+  /** When the newest invoice entered Fisko (createdAt), or null when none. */
   lastInvoiceAt: Date | null;
   /** Invoices imported in the last 10 days. */
   recentCount: number;
@@ -112,7 +112,7 @@ export function buildInsights(input: InsightInput): Insight[] {
       body:
         'Conectá tu correo y Fisko importa solo las facturas electrónicas que ' +
         'recibís como adjunto.',
-      action: { label: 'Conectar correo', route: '/perfil/conectar-email' },
+      action: { label: 'Conectar correo', route: '/perfil/email' },
     });
   } else {
     const dias = daysBetween(now, lastInvoiceAt);
@@ -124,7 +124,7 @@ export function buildInsights(input: InsightInput): Insight[] {
         body:
           'Si seguís recibiendo comprobantes, puede que falte sincronizar tu ' +
           'casilla. Las facturas que no entran no cuentan para tu IVA crédito.',
-        action: { label: 'Sincronizar', route: '/perfil/conectar-email' },
+        action: { label: 'Sincronizar', route: '/perfil/email' },
       });
     }
   }

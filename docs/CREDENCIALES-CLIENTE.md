@@ -115,11 +115,28 @@ Para los planes de suscripción (cobro en guaraníes).
 **Enviarnos:** Public token · Private token. (Los detalles exactos de la API los
 confirmamos con la documentación oficial de Pagopar al implementar.)
 
+4. En el panel, **Desarrollador → "Integrar con mi sitio web"**, cargá estas dos URLs
+   (copiar tal cual, incluido el `($hash)`):
+
+   | Campo | Valor |
+   |---|---|
+   | **URL DE REDIRECCIONAMIENTO** | `https://fisko-api-gxyk.onrender.com/pago/resultado/($hash)` |
+   | **URL DE RESPUESTA** | `https://fisko-api-gxyk.onrender.com/api/v1/subscriptions/webhook` |
+
+5. Hacé **un pago de prueba** desde la app (Perfil → Mi plan → Básico) con la tarjeta de
+   pruebas de Pagopar. Recién después de una transacción exitosa Pagopar habilita la
+   pestaña **PRODUCCIÓN**; enviarnos ese segundo par de tokens.
+
 ---
 
 ## 5. Meta — envío de reportes por WhatsApp
 
-Para mandar el PDF/Excel al WhatsApp del usuario.
+> **Ya no hace falta.** El envío se hizo con el compartir nativo del teléfono: desde
+> Reportes, el PDF/Excel se comparte a WhatsApp (o a cualquier app) sin cuenta de Meta ni
+> número dedicado. Lo de abajo queda sólo como referencia por si algún día se quiere un
+> envío automático desde el servidor.
+
+Para mandar el PDF/Excel al WhatsApp del usuario **desde el servidor** (no implementado):
 
 1. Entrá a <https://business.facebook.com> y creá una **cuenta de Meta Business**.
 2. Entrá a <https://developers.facebook.com> → **"Create App"** → tipo **"Business"**.

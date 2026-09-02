@@ -97,10 +97,23 @@ export async function login(input: LoginInput): Promise<AuthResult> {
 export async function googleAuth(input: GoogleInput): Promise<AuthResult> {
   const profile = await verifyGoogleIdToken(input.idToken);
 
-  // Upsert: match by googleId first, then by email (link accounts).
-  let user = await prisma.user.findFirst({
-    where: { OR: [{ googleId: profile.googleId }, { email: profile.email }] },
-  });
+  // Match by googleId first; only then by e-mail, to link an existing
+  // password account to this Google identity.
+  let user = await prisma.user.findFirst({ where: { googleId: profile.googleId } });
+  if (!user) {
+    const byEmail = await prisma.user.findUnique({ where: { email: profile.email } });
+    if (byEmail) {
+      // Linking by e-mail alone would let anyone controlling a Google account
+      // with an unverified (non-Gmail) address take over the local account
+      // that uses that address.
+      if (!profile.emailVerified) {
+        throw AppError.unauthorized(
+          'Google no verificó el correo de esa cuenta. Entrá con tu contraseña.',
+        );
+      }
+      user = byEmail;
+    }
+  }
 
   if (!user) {
     user = await prisma.user.create({

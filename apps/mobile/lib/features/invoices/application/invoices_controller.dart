@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../insights/insights_api.dart';
 
 import '../../../core/errors/failures.dart';
 import '../../reports/application/summary_controller.dart';
@@ -54,7 +55,10 @@ class InvoicesController extends Notifier<InvoicesState> {
   /// The Dashboard/Reports summary is cached, so it must be dropped whenever the
   /// invoice set changes — otherwise "Inicio" keeps showing "Sin datos todavía"
   /// after the first import.
-  void _refreshDashboard() => ref.invalidate(fiscalSummaryProvider);
+  void _refreshDashboard() {
+    ref.invalidate(fiscalSummaryProvider);
+    ref.invalidate(insightsProvider);
+  }
 
   void clearMessages() => state = state.copyWith(clearMessages: true);
 }

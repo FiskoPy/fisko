@@ -85,7 +85,7 @@ describe('buildInsights — capture nudge', () => {
   it('invites a user with no invoices to connect their mailbox', () => {
     const out = buildInsights(input());
     const nudge = out.find((i) => i.kind === 'sin_capturas')!;
-    expect(nudge.action?.route).toBe('/perfil/conectar-email');
+    expect(nudge.action?.route).toBe('/perfil/email');
   });
 
   it('nudges after 10 quiet days', () => {

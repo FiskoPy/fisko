@@ -179,6 +179,7 @@ export async function syncEmail(
     pass: decryptSecret(conn.secretEnc),
   };
 
+  const owner = await prisma.user.findUnique({ where: { id: userId }, select: { ruc: true } });
   const xmls = await fetchSifenXmls(creds, { sinceDays });
   const result: SyncResult = {
     scanned: xmls.length,
@@ -190,7 +191,7 @@ export async function syncEmail(
 
   for (const { filename, xml } of xmls) {
     try {
-      await importXml(userId, xml, 'email');
+      await importXml(userId, xml, 'email', { expectRuc: owner?.ruc ?? null });
       result.imported += 1;
     } catch (err) {
       if (err instanceof AppError && err.status === 409) {

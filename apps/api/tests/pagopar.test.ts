@@ -12,6 +12,8 @@ const PUBLIC = 'test-public-token-0123456789';
 
 let transactionToken: (id: string, monto: number) => string;
 let verifyWebhookToken: (hash: string, received: string) => boolean;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let buildTransactionBody: (input: any) => any;
 let canExportReports: (plan: { invoiceLimit: number | null }, n: number) => boolean;
 let PLANS: { id: string; priceGs: number | null; checkout: string; invoiceLimit: number | null }[];
 
@@ -22,6 +24,7 @@ beforeAll(async () => {
   const plans = await import('../src/services/plans');
   transactionToken = pagopar.transactionToken;
   verifyWebhookToken = pagopar.verifyWebhookToken;
+  buildTransactionBody = pagopar.buildTransactionBody;
   canExportReports = plans.canExportReports as typeof canExportReports;
   PLANS = plans.PLANS as typeof PLANS;
 });
@@ -99,5 +102,44 @@ describe('canExportReports — the limit gates output, never capture', () => {
 
   it('never limits an unlimited plan', () => {
     expect(canExportReports({ invoiceLimit: null }, 10_000)).toBe(true);
+  });
+});
+
+describe('buildTransactionBody — the shape Pagopar documents', () => {
+  const input = {
+    idPedido: 'fisko-basico-abc-1',
+    montoGs: 59900,
+    buyer: { nombre: 'TecBio', email: 'a@b.py', ruc: '80175384-8', telefono: null },
+    item: { nombre: 'Fisko Básico', precioGs: 59900, idProducto: 'basico', descripcion: 'Suscripción' },
+    maxPaymentDate: new Date(Date.UTC(2026, 8, 3, 12, 0, 0)),
+  };
+
+  it('always sends tipo_documento CI and a digits-only documento', () => {
+    const b = buildTransactionBody(input);
+    expect(b.comprador.tipo_documento).toBe('CI');
+    expect(b.comprador.documento).toBe('80175384');
+    expect(b.comprador.ruc).toBe('80175384-8');
+  });
+
+  it('gives every item ciudad and the vendor public_key, and a numeric id_producto', () => {
+    const it0 = buildTransactionBody(input).compras_items[0];
+    expect(it0.ciudad).toBe('1');
+    expect(it0.public_key).toBe(PUBLIC);
+    expect(typeof it0.id_producto).toBe('number');
+    expect(it0.precio_total).toBe(59900);
+  });
+
+  it('formats fecha_maxima_pago as YYYY-MM-DD HH:mm:ss, not ISO', () => {
+    expect(buildTransactionBody(input).fecha_maxima_pago).toBe('2026-09-03 12:00:00');
+  });
+
+  it('lets the buyer choose the payment method: no forma_pago', () => {
+    expect('forma_pago' in buildTransactionBody(input)).toBe(false);
+  });
+
+  it('survives a buyer without RUC', () => {
+    const b = buildTransactionBody({ ...input, buyer: { ...input.buyer, ruc: null } });
+    expect(b.comprador.ruc).toBe('');
+    expect(b.comprador.documento).toBe('');
   });
 });

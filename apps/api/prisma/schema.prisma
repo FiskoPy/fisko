@@ -136,6 +136,12 @@ model Subscription {
   /// Pagopar order identifiers. hashPedido is what the webhook echoes back.
   pedidoId   String? @unique
   hashPedido String?
+  /// Plan being paid for while an earlier paid period is still running, so an
+  /// upgrade (or an abandoned checkout) never downgrades a paying user.
+  pendingPlanId  String?
+  /// The order hash that was credited: a re-notification of the same order
+  /// must not stack another month.
+  paidHashPedido String?
 
   priceGs     Int?
   /// When the current paid period ends; null while pending.

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../insights/insights_api.dart';
 
 import '../../../core/errors/error_message.dart';
 import '../../../core/format.dart';
@@ -119,6 +120,7 @@ class _ConnectionTileState extends ConsumerState<_ConnectionTile> {
       if (res.imported > 0) {
         // Newly captured invoices must show up on Inicio/Captura right away.
         ref.invalidate(fiscalSummaryProvider);
+        ref.invalidate(insightsProvider);
         await ref.read(invoicesControllerProvider.notifier).load();
       }
     } catch (e) {

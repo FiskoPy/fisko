@@ -23,7 +23,7 @@ export const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
     res.status(413).json({
       error: {
         code: 'PAYLOAD_TOO_LARGE',
-        message: 'El archivo es demasiado grande. Probá con una foto más liviana.',
+        message: 'El archivo es demasiado grande para enviarlo. Probá con una foto más liviana o un XML más chico.',
       },
     });
     return;

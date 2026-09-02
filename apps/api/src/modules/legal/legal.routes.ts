@@ -17,7 +17,7 @@ const EMPRESA = process.env.LEGAL_EMPRESA ?? 'TecBio';
 const RUC = process.env.LEGAL_RUC ?? '80175384-8';
 const CONTACTO = process.env.LEGAL_CONTACT_EMAIL ?? 'fiskopy@gmail.com';
 
-const ACTUALIZADO = '19 de agosto de 2026';
+const ACTUALIZADO = '1 de septiembre de 2026';
 
 const page = (titulo: string, cuerpo: string): string => `<!doctype html>
 <html lang="es">
@@ -71,6 +71,13 @@ de datos personales.</p>
       identificador de cuenta de Google. No accedemos a tus contactos ni a tu Drive.</li>
   <li><strong>Facturas electrónicas (DTE)</strong> que importás: CDC, RUC y nombre del emisor y del
       receptor, fecha, moneda, montos, IVA discriminado (5% y 10%) y el detalle de los ítems.</li>
+  <li><strong>Fotos de facturas de papel</strong>, si usás la cámara: la imagen se envía a
+      <strong>Google Cloud Vision</strong> únicamente para leer el texto, no se guarda en nuestros
+      servidores ni en Google, y de ella conservamos sólo los datos fiscales extraídos.</li>
+  <li><strong>Datos de pago:</strong> las suscripciones se cobran a través de <strong>Pagopar</strong>.
+      El número de tu tarjeta y demás datos de pago los ingresás en la página de Pagopar y
+      <strong>nunca pasan por Fisko</strong>; nosotros recibimos únicamente la confirmación del
+      cobro, el plan contratado y el identificador del pedido.</li>
   <li><strong>Casilla de correo conectada</strong>, si activás la captura automática: la dirección y
       la contraseña de aplicación. Esa contraseña se guarda <strong>cifrada</strong> (AES-256-GCM) y
       se usa únicamente para <strong>leer</strong> los adjuntos XML de facturas. Fisko no envía
@@ -82,7 +89,12 @@ de datos personales.</p>
 <ul>
   <li>Autenticarte y mantener tu sesión.</li>
   <li>Calcular tu resumen fiscal: IVA 5% y 10%, crédito y débito, y la estimación de IRP.</li>
+  <li>Leer automáticamente las facturas de papel que fotografiás.</li>
   <li>Generar los reportes en PDF y Excel que vos solicitás.</li>
+  <li>Mostrarte avisos sobre tu IVA (gasto reciente, saldo acumulado, vencimiento) y una
+      <strong>proyección del IVA del mes</strong>. Para redactar esa proyección enviamos a
+      <strong>OpenAI</strong> únicamente montos totales por mes, sin tu nombre, RUC, correo ni el
+      detalle de ninguna factura.</li>
   <li>Importar automáticamente las facturas que llegan a la casilla que conectaste.</li>
   <li>Enviarte el correo de recuperación de contraseña cuando lo pedís.</li>
 </ul>
@@ -91,9 +103,12 @@ comerciales.</p>
 
 <h2>Dónde se guardan</h2>
 <p>Los datos se almacenan en una base de datos gestionada por <strong>Render</strong>, con servidores
-en los Estados Unidos, y los correos de recuperación se envían mediante <strong>Brevo</strong>. Esto
-implica una transferencia internacional de datos, necesaria para prestar el servicio. Ambos
-proveedores actúan únicamente como encargados del tratamiento por nuestra cuenta.</p>
+en los Estados Unidos, y los correos de recuperación se envían mediante <strong>Brevo</strong>. Para
+funciones puntuales intervienen además <strong>Google Cloud Vision</strong> (lectura de fotos),
+<strong>OpenAI</strong> (redacción de la proyección de IVA, sólo con montos agregados) y
+<strong>Pagopar</strong> (cobro de suscripciones, en Paraguay). Esto implica una transferencia
+internacional de datos, necesaria para prestar el servicio. Todos actúan únicamente como encargados
+del tratamiento por nuestra cuenta y no usan tus datos para fines propios.</p>
 
 <h2>Cuánto tiempo</h2>
 <p>Conservamos tus datos mientras tu cuenta esté activa. Si solicitás la eliminación, borramos tu
@@ -131,7 +146,11 @@ legalRouter.get('/eliminar-cuenta', (_req, res) => {
 <p>Podés pedir la eliminación de tu cuenta de Fisko y de todos los datos asociados en cualquier
 momento. No hace falta ningún trámite presencial.</p>
 
-<h2>Cómo pedirlo</h2>
+<h2>Desde la app (inmediato)</h2>
+<p>Entrá a <em>Perfil → Eliminar mi cuenta</em> y confirmá. La cuenta, las facturas y las casillas
+conectadas se borran en el momento, sin esperar.</p>
+
+<h2>Por correo</h2>
 <ul>
   <li>Escribí a <a href="mailto:${CONTACTO}">${CONTACTO}</a> desde
       <strong>la misma dirección de correo con la que te registraste</strong>, con el asunto

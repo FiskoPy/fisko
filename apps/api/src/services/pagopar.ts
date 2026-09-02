@@ -68,6 +68,14 @@ export interface CheckoutItem {
   descripcion: string;
 }
 
+export interface CheckoutInput {
+  idPedido: string;
+  montoGs: number;
+  buyer: CheckoutBuyer;
+  item: CheckoutItem;
+  maxPaymentDate: Date;
+}
+
 export interface CheckoutResult {
   /** Order hash Pagopar assigns; the webhook echoes it back. */
   hashPedido: string;
@@ -81,54 +89,78 @@ export interface CheckoutResult {
  * Note the date format: Pagopar expects "YYYY-MM-DD HH:mm:ss", not ISO — an
  * ISO string is rejected with an unhelpful error.
  */
-export async function createCheckout(input: {
-  idPedido: string;
-  montoGs: number;
-  buyer: CheckoutBuyer;
-  item: CheckoutItem;
-  maxPaymentDate: Date;
-}): Promise<CheckoutResult> {
-  if (!env.PAGOPAR_PUBLIC_TOKEN) {
-    throw AppError.serviceUnavailable('Los pagos no están habilitados en este servidor.');
-  }
+/**
+ * Pagopar's numeric id_producto. The catalogue is ours; Pagopar only needs a
+ * stable number per product.
+ */
+const PRODUCT_IDS: Record<string, number> = { gratis: 1, basico: 2, pro: 3, empresarial: 4 };
 
-  const d = input.maxPaymentDate;
-  const pad = (n: number) => String(n).padStart(2, '0');
-  const fechaMaxima =
-    `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ` +
-    `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
-
-  const body = {
+/**
+ * The request body for iniciar-transaccion, exactly as Pagopar documents it:
+ *  - tipo_documento is always "CI"; the RUC goes in its own field as "base-dv".
+ *  - documento carries digits only (the RUC base, since we hold no CI).
+ *  - every item needs ciudad and the vendor public_key, even without courier.
+ *  - forma_pago is omitted so the buyer picks the method on Pagopar's page.
+ * Exported so the shape is tested without a network.
+ */
+export function buildTransactionBody(input: CheckoutInput) {
+  const rucBase = ((input.buyer.ruc ?? '').split('-')[0] ?? '').replace(/\D/g, '');
+  return {
     token: transactionToken(input.idPedido, input.montoGs),
     public_key: env.PAGOPAR_PUBLIC_TOKEN,
     monto_total: input.montoGs,
     tipo_pedido: 'VENTA-COMERCIO',
     id_pedido_comercio: input.idPedido,
-    fecha_maxima_pago: fechaMaxima,
+    fecha_maxima_pago: formatPagoparDate(input.maxPaymentDate),
     descripcion_resumen: input.item.descripcion,
     comprador: {
       ruc: input.buyer.ruc ?? '',
       email: input.buyer.email,
       nombre: input.buyer.nombre,
       telefono: input.buyer.telefono ?? '',
-      documento: input.buyer.ruc ?? '',
-      tipo_documento: input.buyer.ruc ? 'RUC' : 'CI',
+      documento: rucBase,
+      tipo_documento: 'CI',
+      razon_social: '',
       ciudad: '1',
       direccion: '',
+      direccion_referencia: '',
       coordenadas: '',
-      railway_send: false,
     },
     compras_items: [
       {
         nombre: input.item.nombre,
-        cantidad: 1,
-        categoria: '909', // "Servicios" in Pagopar's catalogue
-        precio_total: input.montoGs,
-        id_producto: input.item.idProducto,
         descripcion: input.item.descripcion,
+        cantidad: 1,
+        precio_total: input.montoGs,
+        id_producto: PRODUCT_IDS[input.item.idProducto] ?? 0,
+        categoria: '909', // "Servicios" in Pagopar's catalogue
+        ciudad: '1',
+        public_key: env.PAGOPAR_PUBLIC_TOKEN,
+        url_imagen: '',
+        vendedor_telefono: '',
+        vendedor_direccion: '',
+        vendedor_direccion_referencia: '',
+        vendedor_direccion_coordenadas: '',
       },
     ],
   };
+}
+
+/** "YYYY-MM-DD HH:mm:ss" — Pagopar rejects ISO 8601. */
+function formatPagoparDate(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return (
+    `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ` +
+    `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`
+  );
+}
+
+export async function createCheckout(input: CheckoutInput): Promise<CheckoutResult> {
+  if (!env.PAGOPAR_PUBLIC_TOKEN) {
+    throw AppError.serviceUnavailable('Los pagos no están habilitados en este servidor.');
+  }
+
+  const body = buildTransactionBody(input);
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
@@ -142,21 +174,32 @@ export async function createCheckout(input: {
 
     const data = (await res.json().catch(() => null)) as {
       respuesta?: boolean;
-      resultado?: { data?: string; pedido?: string }[] | { data?: string };
+      // On success an array of {data, pedido}; on failure a plain string with
+      // the reason ("Token no coincide.", a field rule, ...).
+      resultado?: { data?: string; pedido?: string }[] | { data?: string } | string;
       mensaje?: string;
     } | null;
 
     if (!res.ok || !data || data.respuesta === false) {
+      const reason =
+        typeof data?.resultado === 'string' ? data.resultado : (data?.mensaje ?? null);
       logger.warn(
-        { status: res.status, mensaje: data?.mensaje, idPedido: input.idPedido },
+        { status: res.status, reason, idPedido: input.idPedido },
         'Pagopar rejected the transaction',
       );
+      // The reason travels in `details`, not in `message`: the app shows the
+      // message, and an operator reading the response gets the actual cause.
       throw AppError.badRequest(
         'No se pudo iniciar el pago. Probá de nuevo en unos minutos.',
+        reason ? { pagopar: reason } : undefined,
       );
     }
 
-    const first = Array.isArray(data.resultado) ? data.resultado[0] : data.resultado;
+    const first = Array.isArray(data.resultado)
+      ? data.resultado[0]
+      : typeof data.resultado === 'object'
+        ? data.resultado
+        : undefined;
     const hashPedido = first?.data;
     if (!hashPedido) {
       logger.warn({ data }, 'Pagopar responded without an order hash');

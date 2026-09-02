@@ -4,6 +4,7 @@ import { AppError } from '../../errors/app-error';
 import { parseDte, isValidCdcCheckDigit } from '../../services/sifen';
 import { extractText, MAX_IMAGE_BYTES } from '../../services/ocr';
 import { parseReceipt, receiptKey, type ParsedReceipt } from '../../services/receipt-parser';
+import { normalizeRuc } from '../../utils/ruc';
 
 type InvoiceWithItems = Invoice & { items: InvoiceItem[] };
 
@@ -86,12 +87,43 @@ export function toPublicInvoice(inv: Invoice & { items?: InvoiceItem[] }): Publi
 }
 
 /** Parses a DTE XML, validates it, dedups by (user, CDC) and stores it. */
+/** A DTE belongs to a taxpayer when they are its emisor or its receptor. */
+export function dteBelongsTo(
+  dte: { emisorRuc: string; receptorRuc: string | null },
+  ruc: string,
+): boolean {
+  // Compare RUC bases: the DTE carries the base and the check digit in
+  // separate fields, and a caller may hand us "base-dv".
+  const base = (r: string) => normalizeRuc(r.split('-')[0] ?? '');
+  const mine = base(ruc);
+  if (!mine) return true;
+  if (base(dte.emisorRuc) === mine) return true;
+  return dte.receptorRuc != null && base(dte.receptorRuc) === mine;
+}
+
+export interface ImportOptions {
+  /**
+   * When set, the DTE must name this RUC as emisor or receptor. Used by the
+   * mailbox sync: anyone who knows the user's address can e-mail them a valid
+   * DTE, and without this check it would land in their tax records.
+   */
+  expectRuc?: string | null;
+}
+
 export async function importXml(
   userId: string,
   xml: string,
   source = 'manual',
+  opts: ImportOptions = {},
 ): Promise<PublicInvoice> {
   const dte = parseDte(xml);
+
+  if (opts.expectRuc && !dteBelongsTo(dte, opts.expectRuc)) {
+    throw AppError.badRequest(
+      'La factura no está a tu nombre: ni el emisor ni el receptor coinciden con tu RUC.',
+      { emisorRuc: dte.emisorRuc, receptorRuc: dte.receptorRuc },
+    );
+  }
 
   if (!isValidCdcCheckDigit(dte.cdc)) {
     throw AppError.badRequest('CDC inválido (dígito verificador no coincide)');
@@ -271,5 +303,8 @@ export async function importPhoto(userId: string, imageBase64: string) {
     include: { items: true },
   });
 
-  return { invoice, missing: parsed.missing, confidence: parsed.confidence };
+  // The raw Prisma row serialises Decimal columns as strings, which the app's
+  // parser rejects — after the invoice was already stored. Same shape as
+  // import-xml, so the client has one Invoice to understand.
+  return { invoice: toPublicInvoice(invoice), missing: parsed.missing, confidence: parsed.confidence };
 }

@@ -106,7 +106,7 @@ class PerfilPage extends ConsumerWidget {
               sub.when(
                 loading: () => 'Cargando…',
                 error: (_, __) => 'Ver planes disponibles',
-                data: (s) => s.isActive ? 'Plan ${s.planId}' : 'Plan Gratis',
+                data: (s) => s.isActive ? 'Plan ${s.planName}' : 'Plan Gratis',
               ),
             ),
             trailing: const Icon(Icons.chevron_right),

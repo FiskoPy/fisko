@@ -6,6 +6,8 @@ import '../../core/errors/error_message.dart';
 import '../../core/format.dart';
 import '../../core/theme/app_theme.dart';
 import '../reports/application/summary_controller.dart';
+import '../insights/insights_api.dart';
+import '../insights/insights_section.dart';
 import '../reports/data/models/summary_models.dart';
 
 class DashboardPage extends ConsumerWidget {
@@ -18,7 +20,10 @@ class DashboardPage extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('Inicio')),
       body: RefreshIndicator(
-        onRefresh: () async => ref.invalidate(fiscalSummaryProvider),
+        onRefresh: () async {
+          ref.invalidate(fiscalSummaryProvider);
+          ref.invalidate(insightsProvider);
+        },
         child: async.when(
           loading: () => const Center(child: CircularProgressIndicator()),
           error: (e, _) => ListView(
@@ -61,6 +66,7 @@ class _Dashboard extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
       children: [
+        const InsightsSection(),
         _IvaComposition(summary: s),
         const SizedBox(height: 16),
         GridView.count(

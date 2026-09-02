@@ -3,8 +3,9 @@
 > **O que é este arquivo:** instruções persistentes de escopo do projeto neste repositório.
 > **Fase ativa:** **MARCO 2 — Núcleo funcional** (Marco 1 entregue/aceito). Em execução faseada:
 > ✅ 2A SIFEN+faturas → ✅ 2B dashboard/relatórios → 🟡 2C e-mail (Gmail/IMAP pronto; Outlook OAuth pendente de Azure)
-> → 2D OCR → 2E IA → 2F Pagopar → 2G WhatsApp. As fases 2D–2G aguardam credenciais do cliente
-> (ver `docs/CREDENCIALES-CLIENTE.md`).
+> → ✅ 2D OCR (código pronto; Vision aguarda vínculo de faturamento no projeto do cliente)
+> → ✅ 2E IA fiscal v1 → 🟡 2F Pagopar (código pronto; falta 1 pagamento de teste para liberar tokens de produção)
+> → ✅ 2G WhatsApp (compartilhamento nativo do PDF/Excel; sem Meta Business). Status em 2026-09-01.
 > Leia a seção **"REGRA DE ESCOPO / FASEAMENTO"** antes de qualquer coisa.
 
 ---

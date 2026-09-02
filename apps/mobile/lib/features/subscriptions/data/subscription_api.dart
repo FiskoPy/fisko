@@ -46,9 +46,17 @@ class Plan {
 
 /// What the logged-in user currently has.
 class MySubscription {
-  MySubscription({required this.planId, required this.status, this.currentPeriodEnd});
+  MySubscription({
+    required this.planId,
+    required this.planName,
+    required this.status,
+    this.currentPeriodEnd,
+  });
 
   final String planId;
+
+  /// Display name from the server ('Básico'), never the id ('basico').
+  final String planName;
 
   /// active | pending | expired | cancelled | none
   final String status;
@@ -60,6 +68,7 @@ class MySubscription {
     final plan = j['plan'] as Map<String, dynamic>?;
     return MySubscription(
       planId: (plan?['id'] as String?) ?? 'gratis',
+      planName: (plan?['name'] as String?) ?? 'Gratis',
       status: (j['status'] as String?) ?? 'none',
       currentPeriodEnd: j['currentPeriodEnd'] != null
           ? DateTime.tryParse(j['currentPeriodEnd'] as String)
