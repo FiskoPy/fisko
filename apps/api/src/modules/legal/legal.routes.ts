@@ -1,4 +1,6 @@
 import { Router } from 'express';
+import { prisma } from '../../lib/prisma';
+import { asyncHandler } from '../../utils/async-handler';
 
 /**
  * Public legal pages, served outside /api/v1 so the URLs read as web pages in
@@ -156,28 +158,37 @@ conservando las facturas que ya importaste.</p>`,
 /**
  * Where Pagopar sends the payer after checkout.
  *
- * Fisko is a mobile app, so there is no website to land on: without this the
- * user finishes paying and is left on a dead page wondering if it worked. The
- * page confirms the payment was received and tells them to reopen the app —
- * deliberately vague about activation, because the webhook is what actually
- * credits the subscription and it may land a moment later.
+ * Pagopar requires the configured URL to carry the literal "($hash)" segment,
+ * which it substitutes with the order hash. That is a gift: with the hash we
+ * can look the order up and tell the customer what actually happened, instead
+ * of a generic "thanks" that is right half the time.
+ *
+ * Still worded carefully around timing — the webhook is what credits the
+ * subscription, and the browser can land here before it arrives.
  */
-legalRouter.get('/pago/resultado', (_req, res) => {
-  res.type('html').send(
-    page(
-      'Pago recibido',
-      `<h1>Listo</h1>
-<p class="fecha">Tu pago fue enviado a Pagopar.</p>
+legalRouter.get(
+  '/pago/resultado/:hash?',
+  asyncHandler(async (req, res) => {
+    const hash = (req.params as { hash?: string }).hash;
+    const sub = hash
+      ? await prisma.subscription.findFirst({ where: { hashPedido: hash } })
+      : null;
 
-<p>Ya podés cerrar esta página y <strong>volver a la app Fisko</strong>.</p>
+    const paid = sub?.status === 'active';
+    const body = paid
+      ? `<h1>Tu plan está activo</h1>
+<p class="fecha">Pago confirmado.</p>
+<p>Ya podés cerrar esta página y volver a la app Fisko. Vas a ver tu plan
+actualizado en <em>Perfil</em>.</p>`
+      : `<h1>Pago recibido</h1>
+<p class="fecha">Estamos esperando la confirmación de Pagopar.</p>
+<p>Cerrá esta página y <strong>volvé a la app Fisko</strong>. La activación
+puede tardar un par de minutos: Pagopar nos avisa apenas confirma el cobro.</p>
 
-<p>La activación de tu plan puede tardar hasta un par de minutos: Pagopar nos
-avisa apenas se confirma el cobro. Si al volver todavía no aparece activo,
-esperá un momento y tocá para actualizar.</p>
+<h2>¿Y si no se completó?</h2>
+<p>Si el cobro no salió, no se activa ningún plan y no se te cobra nada.
+Podés intentarlo de nuevo desde la app.</p>`;
 
-<h2>¿Algo no salió bien?</h2>
-<p>Si el cobro no se completó, no se activa ningún plan y no se te cobra nada.
-Podés intentarlo de nuevo desde la app.</p>`,
-    ),
-  );
-});
+    res.type('html').send(page(paid ? 'Plan activo' : 'Pago recibido', body));
+  }),
+);
