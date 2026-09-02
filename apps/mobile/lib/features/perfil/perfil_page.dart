@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/config/constants.dart';
@@ -139,8 +140,37 @@ class PerfilPage extends ConsumerWidget {
             onTap: busy ? null : () => _confirmDelete(context, ref),
           ),
           const SizedBox(height: 24),
+          const _VersionLabel(),
+          const SizedBox(height: 16),
         ],
       ),
+    );
+  }
+}
+
+/// Which build is this. During testing it is the only way to tell a report
+/// about the current APK from one about the previous one; in the stores it is
+/// what a user quotes to support.
+class _VersionLabel extends StatelessWidget {
+  const _VersionLabel();
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<PackageInfo>(
+      future: PackageInfo.fromPlatform(),
+      builder: (context, snap) {
+        final info = snap.data;
+        if (info == null) return const SizedBox(height: 18);
+        return Center(
+          child: Text(
+            'Fisko ${info.version} (${info.buildNumber})',
+            style: TextStyle(
+              fontSize: 12,
+              color: Theme.of(context).colorScheme.outline,
+            ),
+          ),
+        );
+      },
     );
   }
 }

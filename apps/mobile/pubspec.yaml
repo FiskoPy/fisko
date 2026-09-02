@@ -1,7 +1,7 @@
 name: fisko
 description: Fisko — gestión fiscal para contribuyentes paraguayos.
 publish_to: "none"
-version: 0.1.0+1
+version: 0.2.0+2
 
 environment:
   sdk: ">=3.4.0 <4.0.0"
@@ -43,6 +43,9 @@ dependencies:
 
   # Foto de facturas de papel (OCR — Marco 2 fase 2D)
   image_picker: ^1.1.2
+
+  # Versión visible en Perfil: sin esto no hay forma de saber qué build se está probando
+  package_info_plus: ^8.0.2
 
   # Abrir la política de privacidad (y, más adelante, el checkout de Pagopar)
   url_launcher: ^6.3.1
