@@ -98,11 +98,30 @@ class PerfilPage extends ConsumerWidget {
       ),
     );
 
-    if (ok != true) return;
-    await ref.read(authControllerProvider.notifier).setRuc(
+    if (ok != true || !context.mounted) return;
+
+    final saved = await ref.read(authControllerProvider.notifier).setRuc(
           ruc: RucValidator.normalize(rucCtrl.text),
           rucDv: int.parse(dvCtrl.text.trim()),
         );
+    if (!context.mounted) return;
+
+    // Perfil sits outside the auth screens, so AuthMessageListener is not
+    // mounted here — say what happened ourselves, as _confirmDelete does.
+    if (saved) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('RUC guardado. Tus totales se actualizaron.')),
+      );
+    } else {
+      final reason = ref.read(authControllerProvider).errorMessage;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(reason ?? 'No se pudo guardar el RUC.'),
+          backgroundColor: Theme.of(context).colorScheme.error,
+        ),
+      );
+    }
+    ref.read(authControllerProvider.notifier).clearMessages();
   }
 
   Future<void> _confirmDelete(BuildContext context, WidgetRef ref) async {
