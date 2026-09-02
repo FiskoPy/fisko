@@ -37,9 +37,24 @@ flutter run \
 
 ## Builds
 
+**Release (Android) — use sempre o script:**
+
 ```bash
-flutter build apk --release   # Android
-flutter build ios --release   # iOS (assinatura no Xcode)
+node ../../scripts/build-apk.js
+```
+
+Ele injeta os `--dart-define`, recusa uma `API_BASE_URL` que um celular real nao
+alcanca, e **confere no binario compilado** que a URL de producao entrou.
+
+> **Nunca** rode `flutter build apk --release` puro para entregar. `Env.apiBaseUrl`
+> tem `defaultValue` igual ao alias do emulador (`10.0.2.2`), entao o APK compila,
+> instala e abre — e toda chamada morre no socket, com o app dizendo ao testador
+> "Sin conexion. Revisa tu internet". Ja foi entregue assim uma vez.
+
+iOS (assinatura no Xcode) — os mesmos defines sao obrigatorios:
+
+```bash
+flutter build ios --release   --dart-define=API_BASE_URL=https://fisko-api-gxyk.onrender.com/api/v1   --dart-define=GOOGLE_OAUTH_CLIENT_ID=<client-id-web>
 ```
 
 ## Estrutura (feature-first)

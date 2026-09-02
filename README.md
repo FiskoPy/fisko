@@ -60,12 +60,16 @@ flutter run \
   --dart-define=GOOGLE_OAUTH_CLIENT_ID=<seu-client-id>
 ```
 
-Builds de release:
+Builds de release — **sempre pelo script**, nunca `flutter build apk --release` puro:
 
 ```bash
-flutter build apk --release   # Android
-flutter build ios --release   # iOS (assinatura no Xcode)
+node scripts/build-apk.js
 ```
+
+`Env.apiBaseUrl` tem `defaultValue` igual ao alias do emulador (`10.0.2.2`); sem os
+`--dart-define` o APK compila e abre normalmente, mas nao alcanca servidor nenhum e
+o app culpa a internet do usuario. O script injeta os defines, recusa URLs locais e
+confere a URL dentro do binario gerado. Detalhes em `apps/mobile/README.md`.
 
 ## Dependências externas (a configurar pelo CONTRATANTE antes de produção)
 
