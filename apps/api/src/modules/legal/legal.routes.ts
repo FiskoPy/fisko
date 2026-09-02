@@ -152,3 +152,32 @@ conservando las facturas que ya importaste.</p>`,
     ),
   );
 });
+
+/**
+ * Where Pagopar sends the payer after checkout.
+ *
+ * Fisko is a mobile app, so there is no website to land on: without this the
+ * user finishes paying and is left on a dead page wondering if it worked. The
+ * page confirms the payment was received and tells them to reopen the app —
+ * deliberately vague about activation, because the webhook is what actually
+ * credits the subscription and it may land a moment later.
+ */
+legalRouter.get('/pago/resultado', (_req, res) => {
+  res.type('html').send(
+    page(
+      'Pago recibido',
+      `<h1>Listo</h1>
+<p class="fecha">Tu pago fue enviado a Pagopar.</p>
+
+<p>Ya podés cerrar esta página y <strong>volver a la app Fisko</strong>.</p>
+
+<p>La activación de tu plan puede tardar hasta un par de minutos: Pagopar nos
+avisa apenas se confirma el cobro. Si al volver todavía no aparece activo,
+esperá un momento y tocá para actualizar.</p>
+
+<h2>¿Algo no salió bien?</h2>
+<p>Si el cobro no se completó, no se activa ningún plan y no se te cobra nada.
+Podés intentarlo de nuevo desde la app.</p>`,
+    ),
+  );
+});
