@@ -57,8 +57,15 @@ export async function extractText(imageBase64: string): Promise<string> {
       const body = await res.text().catch(() => '');
       logger.warn({ status: res.status, body: body.slice(0, 300) }, 'Vision request rejected');
       if (res.status === 403) {
+        // Two very different causes share this status: an unlinked billing
+        // account on the Cloud project, and a bad or restricted API key.
+        // Neither is the user's fault, but saying "credential" when billing
+        // is the problem sends whoever reads the log down the wrong path.
+        const billing = /billing/i.test(body);
         throw AppError.serviceUnavailable(
-          'El servicio de lectura de imágenes rechazó la credencial. Avisá al soporte.',
+          billing
+            ? 'La lectura de fotos todavía no está activa en este servidor. Avisá al soporte.'
+            : 'El servicio de lectura de imágenes rechazó la credencial. Avisá al soporte.',
         );
       }
       throw AppError.serviceUnavailable('No se pudo leer la imagen. Probá de nuevo.');

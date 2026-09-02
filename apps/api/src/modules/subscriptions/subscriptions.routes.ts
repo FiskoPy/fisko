@@ -5,7 +5,7 @@ import { prisma } from '../../lib/prisma';
 import { logger } from '../../lib/logger';
 import { requireAuth, type AuthedRequest } from '../../middleware/auth';
 import { asyncHandler } from '../../utils/async-handler';
-import { PLANS, getPlan, FREE_PLAN } from '../../services/plans';
+import { PLANS, getPlan, resolveActive } from '../../services/plans';
 import { createCheckout, verifyWebhookToken } from '../../services/pagopar';
 
 export const subscriptionsRouter = Router();
@@ -107,16 +107,13 @@ subscriptionsRouter.get(
     if (!user) throw AppError.unauthorized();
 
     const sub = await prisma.subscription.findUnique({ where: { userId: user.sub } });
-    const active =
-      sub?.status === 'active' &&
-      sub.currentPeriodEnd != null &&
-      sub.currentPeriodEnd > new Date();
+    // Same resolver the OCR limiter uses, so what we show is what we enforce.
+    const { plan, active } = resolveActive(sub);
 
-    const planId = active ? sub.planId : FREE_PLAN;
     res.status(200).json({
-      plan: getPlan(planId),
+      plan,
       status: active ? 'active' : (sub?.status ?? 'none'),
-      currentPeriodEnd: active ? sub.currentPeriodEnd : null,
+      currentPeriodEnd: active ? (sub?.currentPeriodEnd ?? null) : null,
     });
   }),
 );

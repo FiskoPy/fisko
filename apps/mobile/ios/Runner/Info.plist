@@ -66,5 +66,9 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<key>NSCameraUsageDescription</key>
+	<string>Fisko usa la cámara para sacarle una foto a tus facturas de papel y leerlas automáticamente.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Fisko accede a tus fotos para que puedas elegir la imagen de una factura ya guardada.</string>
 </dict>
 </plist>

@@ -1,5 +1,7 @@
 import rateLimit, { type Options } from 'express-rate-limit';
 
+import { activePlanFor, FREE_PLAN, getPlan } from '../services/plans';
+
 const jsonError = (code: string, message: string) => ({ error: { code, message } });
 
 /**
@@ -59,13 +61,28 @@ export const authLimiter = rateLimit({
  * Counts every attempt, not just successful imports: a stream of unreadable
  * photos costs the same at Google as a stream of good ones.
  */
+/**
+ * Photo OCR, capped per plan.
+ *
+ * Vision is billed per image, so this is the one limit that maps straight to
+ * the client's bill. The catalogue advertises a daily figure per tier; this
+ * is what makes that figure true. Anonymous callers cannot reach here (the
+ * route is behind requireAuth), so an unresolved user means something is
+ * wrong: fall back to the free tier rather than the generous one.
+ */
 export const ocrLimiter = rateLimit({
   windowMs: 24 * 60 * 60 * 1000,
-  limit: 30,
+  limit: async (req) => {
+    const sub = (req as { user?: { sub?: string } }).user?.sub;
+    if (!sub) return getPlan(FREE_PLAN)!.ocrPerDay;
+    return (await activePlanFor(sub)).ocrPerDay;
+  },
   standardHeaders: "draft-7",
   legacyHeaders: false,
   keyGenerator: (req) => (req as { user?: { sub?: string } }).user?.sub ?? req.ip ?? "anon",
   handler: limitHandler(
-    () => "Llegaste al límite diario de fotos. Probá de nuevo mañana o importá el XML.",
+    () =>
+      "Llegaste al límite diario de fotos de tu plan. Probá de nuevo mañana, " +
+      "importá el XML, o pasá a un plan superior.",
   ),
 });

@@ -7,6 +7,7 @@ import '../../core/config/constants.dart';
 import '../../core/config/env.dart';
 import '../../l10n/generated/app_localizations.dart';
 import '../auth/application/auth_controller.dart';
+import '../subscriptions/data/subscription_api.dart';
 
 class PerfilPage extends ConsumerWidget {
   const PerfilPage({super.key});
@@ -76,6 +77,7 @@ class PerfilPage extends ConsumerWidget {
     final user = ref.watch(authControllerProvider.select((s) => s.user));
     final busy = ref.watch(authControllerProvider.select((s) => s.isSubmitting));
     final scheme = Theme.of(context).colorScheme;
+    final sub = ref.watch(mySubscriptionProvider);
 
     return Scaffold(
       appBar: AppBar(title: Text(l10n.perfil)),
@@ -96,6 +98,20 @@ class PerfilPage extends ConsumerWidget {
               ),
             const Divider(),
           ],
+          ListTile(
+            leading: const Icon(Icons.workspace_premium_outlined),
+            title: const Text('Mi plan'),
+            subtitle: Text(
+              sub.when(
+                loading: () => 'Cargando…',
+                error: (_, __) => 'Ver planes disponibles',
+                data: (s) => s.isActive ? 'Plan ${s.planId}' : 'Plan Gratis',
+              ),
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => context.go('${AppRoutes.perfil}/${AppRoutes.planes}'),
+          ),
+          const Divider(),
           ListTile(
             leading: const Icon(Icons.mark_email_read_outlined),
             title: const Text('Conectar correo'),

@@ -41,6 +41,9 @@ dependencies:
   share_plus: ^10.1.2
   path_provider: ^2.1.5
 
+  # Foto de facturas de papel (OCR — Marco 2 fase 2D)
+  image_picker: ^1.1.2
+
   # Abrir la política de privacidad (y, más adelante, el checkout de Pagopar)
   url_launcher: ^6.3.1
 

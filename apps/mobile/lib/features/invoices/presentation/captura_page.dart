@@ -4,9 +4,12 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../../../core/config/constants.dart';
+import '../../../core/errors/error_message.dart';
 import '../application/invoices_controller.dart';
+import '../data/invoices_api.dart';
 import '../data/models/invoice_models.dart';
 import 'invoice_format.dart';
 
@@ -28,6 +31,89 @@ class CapturaPage extends ConsumerWidget {
     }
     if (xml == null || xml.trim().isEmpty) return;
     await ref.read(invoicesControllerProvider.notifier).importXml(xml);
+  }
+
+  /// Photographs a paper invoice and sends it for OCR.
+  ///
+  /// The camera compresses to ~1600px: the server caps the upload at 6MB and a
+  /// modern phone photo blows past that, while Vision reads a 1600px invoice
+  /// just as well as a 4000px one.
+  Future<void> _importPhoto(BuildContext context, WidgetRef ref) async {
+    // Read from context before the first await: the user can leave the tab
+    // while the camera is open, and by then this context is dead.
+    final messenger = ScaffoldMessenger.of(context);
+    final router = GoRouter.of(context);
+    final errorColor = Theme.of(context).colorScheme.error;
+
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_camera_outlined),
+              title: const Text('Sacar foto'),
+              onTap: () => Navigator.pop(ctx, ImageSource.camera),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: const Text('Elegir de la galería'),
+              onTap: () => Navigator.pop(ctx, ImageSource.gallery),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (source == null) return;
+
+    final picked = await ImagePicker().pickImage(
+      source: source,
+      maxWidth: 1600,
+      imageQuality: 85,
+    );
+    if (picked == null) return;
+
+    messenger.showSnackBar(
+      const SnackBar(content: Text('Leyendo la factura…'), duration: Duration(seconds: 30)),
+    );
+
+    try {
+      final bytes = await picked.readAsBytes();
+      final out = await ref.read(invoicesApiProvider).importPhoto(base64Encode(bytes));
+      await ref.read(invoicesControllerProvider.notifier).load();
+      messenger.hideCurrentSnackBar();
+
+      // Say what could not be read instead of pretending the record is complete.
+      // There is no editing yet, so the honest remedy is: look at it, and if it
+      // came out wrong, delete it and shoot the photo again.
+      final String msg;
+      if (out.missing.isNotEmpty) {
+        msg = 'Importada, pero no pudimos leer: ${out.missing.join(", ")}. '
+            'Revisala; si quedó mal, borrala y sacá la foto de nuevo.';
+      } else if (out.confidence < 0.7) {
+        msg = 'Importada, pero la foto se leyó con dificultad. Revisá los montos.';
+      } else {
+        msg = 'Factura importada.';
+      }
+      messenger.showSnackBar(SnackBar(
+        content: Text(msg),
+        duration: const Duration(seconds: 7),
+        action: SnackBarAction(
+          label: 'Ver',
+          onPressed: () => router.push('${AppRoutes.captura}/${out.invoice.id}'),
+        ),
+      ));
+    } catch (e) {
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(friendlyError(e)),
+          backgroundColor: errorColor,
+          duration: const Duration(seconds: 6),
+        ),
+      );
+    }
   }
 
   @override
@@ -52,21 +138,11 @@ class CapturaPage extends ConsumerWidget {
       appBar: AppBar(
         title: const Text('Captura'),
         actions: [
-          // The tab's camera icon promises photo capture; OCR is Marco 2 phase
-          // 2D and not built yet. Say so explicitly instead of letting the icon
-          // imply a feature that silently does not exist.
+          // Paper invoices: photo → Vision OCR → parsed invoice (Marco 2, 2D).
           IconButton(
             icon: const Icon(Icons.photo_camera_outlined),
-            tooltip: 'Sacar foto a una factura (próximamente)',
-            onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text(
-                  'Sacar foto a facturas de papel estará disponible próximamente. '
-                  'Por ahora importá el XML de la factura electrónica.',
-                ),
-                duration: Duration(seconds: 4),
-              ),
-            ),
+            tooltip: 'Sacar foto a una factura de papel',
+            onPressed: () => _importPhoto(context, ref),
           ),
         ],
       ),
@@ -106,7 +182,16 @@ class _EmptyState extends StatelessWidget {
         const SizedBox(height: 16),
         const Center(child: Text('Sin facturas todavía')),
         const SizedBox(height: 4),
-        const Center(child: Text('Tocá "Importar XML" para agregar una factura electrónica.')),
+        const Center(
+          child: Padding(
+            padding: EdgeInsets.symmetric(horizontal: 32),
+            child: Text(
+              'Tocá "Importar XML" para una factura electrónica, o el ícono de '
+              'cámara para sacarle una foto a una factura de papel.',
+              textAlign: TextAlign.center,
+            ),
+          ),
+        ),
       ],
     );
   }

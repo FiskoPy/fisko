@@ -1,3 +1,5 @@
+import { prisma } from '../lib/prisma';
+
 /**
  * Subscription plans — Marco 2 phase 2F.
  *
@@ -91,4 +93,41 @@ export function getPlan(id: string): Plan | null {
 export function canExportReports(plan: Plan, invoicesThisMonth: number): boolean {
   if (plan.invoiceLimit === null) return true;
   return invoicesThisMonth <= plan.invoiceLimit;
+}
+
+/**
+ * The plan a user is actually on right now.
+ *
+ * Shared by /subscriptions/me and the OCR limiter on purpose: if the two
+ * resolved "active" differently, we would show one plan and enforce another.
+ * An expired period falls back to free, so a lapsed subscription stops costing
+ * us Vision calls the moment it lapses.
+ */
+export interface SubscriptionRow {
+  planId: string;
+  status: string;
+  currentPeriodEnd: Date | null;
+}
+
+/** Decides, from a subscription row, what the user is entitled to today. */
+export function resolveActive(sub: SubscriptionRow | null): {
+  plan: Plan;
+  active: boolean;
+} {
+  const active =
+    sub?.status === 'active' &&
+    sub.currentPeriodEnd != null &&
+    sub.currentPeriodEnd > new Date();
+  const free = getPlan(FREE_PLAN)!;
+  return { plan: active ? (getPlan(sub.planId) ?? free) : free, active };
+}
+
+export async function activePlanFor(userId: string): Promise<Plan> {
+  try {
+    const sub = await prisma.subscription.findUnique({ where: { userId } });
+    return resolveActive(sub).plan;
+  } catch {
+    // A database hiccup must not hand out the most expensive tier.
+    return getPlan(FREE_PLAN)!;
+  }
 }

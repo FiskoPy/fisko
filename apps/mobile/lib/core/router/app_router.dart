@@ -14,6 +14,7 @@ import '../../features/invoices/presentation/captura_page.dart';
 import '../../features/invoices/presentation/invoice_detail_page.dart';
 import '../../features/perfil/perfil_page.dart';
 import '../../features/relatorios/relatorios_page.dart';
+import '../../features/subscriptions/presentation/planes_page.dart';
 import '../../features/shell/app_shell.dart';
 import '../config/constants.dart';
 
@@ -91,6 +92,10 @@ final goRouterProvider = Provider<GoRouter>((ref) {
               GoRoute(
                 path: AppRoutes.conectarEmail,
                 builder: (_, __) => const ConectarEmailPage(),
+              ),
+              GoRoute(
+                path: AppRoutes.planes,
+                builder: (_, __) => const PlanesPage(),
               ),
             ],
           ),

@@ -12,6 +12,7 @@ class AppRoutes {
   static const String relatorios = '/relatorios';
   static const String perfil = '/perfil';
   static const String conectarEmail = 'email'; // nested under /perfil
+  static const String planes = 'planes'; // nested under /perfil
 }
 
 class StorageKeys {
