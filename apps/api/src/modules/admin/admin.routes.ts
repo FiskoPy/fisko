@@ -32,7 +32,13 @@ function requireAdmin(req: Request, _res: Response, next: () => void): void {
   next();
 }
 
-const bodySchema = z.object({ email: z.string().email() });
+// Lowercase and trim what the operator typed: registration stores the address
+// lowercased, so a capital letter here answered "no existe una cuenta" for an
+// account that plainly exists — the exact false negative that would make
+// support conclude the user never registered.
+const bodySchema = z.object({
+  email: z.string().trim().toLowerCase().pipe(z.string().email()),
+});
 
 adminRouter.post(
   '/password-reset-code',

@@ -6,7 +6,11 @@ import { logger } from '../lib/logger';
 /** 404 fallback for unmatched routes. */
 export const notFoundHandler: RequestHandler = (_req, res) => {
   res.status(404).json({
-    error: { code: 'NOT_FOUND', message: 'Route not found' },
+    error: {
+      code: 'NOT_FOUND',
+      message:
+        'Esa función no existe en el servidor. Puede que tu app esté desactualizada.',
+    },
   });
 };
 
@@ -40,7 +44,12 @@ export const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
     res.status(400).json({
       error: {
         code: 'VALIDATION_ERROR',
-        message: 'Invalid request payload',
+        // The app shows this message verbatim, so a generic English line told
+        // the user nothing. The first issue's message names the actual field
+        // rule; `details` stays for whoever reads the logs.
+        message:
+          err.issues[0]?.message ??
+          'Revisá los datos que cargaste: hay un campo mal completado.',
         details: err.flatten(),
       },
     });
@@ -49,6 +58,10 @@ export const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
 
   logger.error({ err }, 'Unhandled error');
   res.status(500).json({
-    error: { code: 'INTERNAL', message: 'Internal server error' },
+    error: {
+      code: 'INTERNAL',
+      message:
+        'Tuvimos un problema en el servidor. No es tu internet. Probá de nuevo en unos minutos.',
+    },
   });
 };

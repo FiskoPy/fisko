@@ -8,9 +8,18 @@ import 'package:dio/dio.dart';
 String friendlyError(Object e) {
   if (e is DioException) {
     // The API's standard error envelope: { error: { code, message } }.
+    //
+    // Trust the server's wording only where the server is the authority on it.
+    // For the generic transport codes our own Spanish sentence is better and,
+    // before this, was dead code: the envelope message always won, which is how
+    // an English server string reached a Spanish-only app.
     final data = e.response?.data;
     if (data is Map && data['error'] is Map && data['error']['message'] != null) {
-      return data['error']['message'].toString();
+      const generic = {'INTERNAL', 'NOT_FOUND', 'TOO_MANY_REQUESTS'};
+      final code = data['error']['code']?.toString() ?? '';
+      if (!generic.contains(code)) {
+        return data['error']['message'].toString();
+      }
     }
 
     switch (e.type) {

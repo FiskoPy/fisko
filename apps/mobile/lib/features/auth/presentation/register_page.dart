@@ -86,9 +86,24 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
                     children: [
                       PlainTextField(controller: _name, label: l10n.name),
                       const SizedBox(height: 16),
-                      EmailField(controller: _email, label: l10n.email),
-                      const SizedBox(height: 16),
-                      PasswordField(controller: _password, label: l10n.password),
+                      AutofillGroup(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            EmailField(
+                              controller: _email,
+                              label: l10n.email,
+                              textInputAction: TextInputAction.next,
+                            ),
+                            const SizedBox(height: 16),
+                            PasswordField(
+                              controller: _password,
+                              label: l10n.password,
+                              textInputAction: TextInputAction.next,
+                            ),
+                          ],
+                        ),
+                      ),
                       const SizedBox(height: 16),
                       Row(
                         crossAxisAlignment: CrossAxisAlignment.start,

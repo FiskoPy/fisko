@@ -24,7 +24,7 @@ export const requireAuth: RequestHandler = asyncHandler(async (req, _res, next) 
   const [scheme, token] = header.split(' ');
 
   if (scheme !== 'Bearer' || !token) {
-    throw AppError.unauthorized('Missing Bearer token');
+    throw AppError.unauthorized('Tu sesión venció. Iniciá sesión de nuevo.');
   }
 
   const payload = verifyAccessToken(token);

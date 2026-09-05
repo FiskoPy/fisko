@@ -19,15 +19,15 @@ export class AppError extends Error {
     return new AppError(400, 'BAD_REQUEST', message, details);
   }
 
-  static unauthorized(message = 'Unauthorized', details?: unknown) {
+  static unauthorized(message = 'Tu sesión venció. Iniciá sesión de nuevo.', details?: unknown) {
     return new AppError(401, 'UNAUTHORIZED', message, details);
   }
 
-  static forbidden(message = 'Forbidden', details?: unknown) {
+  static forbidden(message = 'No tenés permiso para hacer esto.', details?: unknown) {
     return new AppError(403, 'FORBIDDEN', message, details);
   }
 
-  static notFound(message = 'Not found', details?: unknown) {
+  static notFound(message = 'No encontramos lo que buscabas.', details?: unknown) {
     return new AppError(404, 'NOT_FOUND', message, details);
   }
 
@@ -35,16 +35,16 @@ export class AppError extends Error {
     return new AppError(409, 'CONFLICT', message, details);
   }
 
-  static tooManyRequests(message = 'Too many requests') {
+  static tooManyRequests(message = 'Demasiados intentos. Esperá un momento.') {
     return new AppError(429, 'TOO_MANY_REQUESTS', message);
   }
 
   /** The server itself cannot do this right now (e.g. no mail transport). */
-  static serviceUnavailable(message = 'Service unavailable') {
+  static serviceUnavailable(message = 'El servicio no está disponible ahora. Probá en unos minutos.') {
     return new AppError(503, 'SERVICE_UNAVAILABLE', message);
   }
 
-  static internal(message = 'Internal server error') {
+  static internal(message = 'Tuvimos un problema en el servidor. Probá de nuevo en unos minutos.') {
     return new AppError(500, 'INTERNAL', message);
   }
 }

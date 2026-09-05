@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_sign_in/google_sign_in.dart';
@@ -31,10 +32,13 @@ class _LoginPageState extends ConsumerState<LoginPage> {
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
-    await ref.read(authControllerProvider.notifier).login(
+    final ok = await ref.read(authControllerProvider.notifier).login(
           email: _email.text.trim(),
           password: _password.text,
         );
+    // Tells Android the credential worked, which is what prompts "save this
+    // password?". Without it nothing is ever offered back on the next login.
+    if (ok) TextInput.finishAutofillContext();
   }
 
   Future<void> _googleSignIn() async {
@@ -86,9 +90,34 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                         style: Theme.of(context).textTheme.headlineMedium,
                       ),
                       const SizedBox(height: 32),
-                      EmailField(controller: _email, label: l10n.email),
-                      const SizedBox(height: 16),
-                      PasswordField(controller: _password, label: l10n.password),
+                      // One AutofillGroup around both fields: Android saves and
+                      // offers back a credential only as a pair. Without this the
+                      // client had to retype, by hand, a password we generated
+                      // for him.
+                      AutofillGroup(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            EmailField(
+                              controller: _email,
+                              label: l10n.email,
+                              textInputAction: TextInputAction.next,
+                            ),
+                            const SizedBox(height: 16),
+                            // minLength 1: this screen must not judge the strength
+                            // of an EXISTING password. Refusing to submit a short
+                            // one reads to the user as "your password is wrong".
+                            PasswordField(
+                              controller: _password,
+                              label: l10n.password,
+                              minLength: 1,
+                              autofillHint: AutofillHints.password,
+                              textInputAction: TextInputAction.done,
+                              onSubmitted: _submit,
+                            ),
+                          ],
+                        ),
+                      ),
                       const SizedBox(height: 8),
                       Align(
                         alignment: Alignment.centerRight,

@@ -44,7 +44,7 @@ export function verifyAccessToken(token: string): AccessTokenPayload {
   try {
     return jwt.verify(token, env.JWT_ACCESS_SECRET) as AccessTokenPayload;
   } catch {
-    throw AppError.unauthorized('Invalid or expired access token');
+    throw AppError.unauthorized('Tu sesión venció. Iniciá sesión de nuevo.');
   }
 }
 
@@ -52,6 +52,6 @@ export function verifyRefreshToken(token: string): RefreshTokenPayload {
   try {
     return jwt.verify(token, env.JWT_REFRESH_SECRET) as RefreshTokenPayload;
   } catch {
-    throw AppError.unauthorized('Invalid or expired refresh token');
+    throw AppError.unauthorized('Tu sesión venció. Iniciá sesión de nuevo.');
   }
 }

@@ -17,7 +17,7 @@ const client = env.GOOGLE_CLIENT_ID ? new OAuth2Client(env.GOOGLE_CLIENT_ID) : n
  */
 export async function verifyGoogleIdToken(idToken: string): Promise<GoogleProfile> {
   if (!client || !env.GOOGLE_CLIENT_ID) {
-    throw AppError.badRequest('Google sign-in is not configured on this server');
+    throw AppError.badRequest('El acceso con Google no está habilitado en este servidor. Entrá con tu correo y contraseña.');
   }
 
   let payload;
@@ -28,11 +28,11 @@ export async function verifyGoogleIdToken(idToken: string): Promise<GoogleProfil
     });
     payload = ticket.getPayload();
   } catch {
-    throw AppError.unauthorized('Invalid Google ID token');
+    throw AppError.unauthorized('No pudimos validar tu cuenta de Google. Probá de nuevo, o entrá con tu correo y contraseña.');
   }
 
   if (!payload?.sub || !payload.email) {
-    throw AppError.unauthorized('Google token missing required claims');
+    throw AppError.unauthorized('Google no nos dio el correo de esa cuenta. Entrá con tu correo y contraseña.');
   }
 
   return {

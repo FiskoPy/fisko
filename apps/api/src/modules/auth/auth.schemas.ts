@@ -1,17 +1,38 @@
 import { z } from 'zod';
 
-const password = z.string().min(8, 'Password must be at least 8 characters').max(128);
-const email = z.string().email().toLowerCase().trim();
+/**
+ * Passwords are compared byte-for-byte by argon2, but the same visible text can
+ * arrive in two different encodings: "Contraseña" is 15 code units in NFC and
+ * 16 in NFD, depending on the keyboard/IME. Proven live: a password registered
+ * in NFC was rejected when typed again in NFD. Normalising both sides to NFC
+ * makes what the user sees the thing that is compared.
+ */
+const password = z
+  .string()
+  .transform((s) => s.normalize('NFC'))
+  .pipe(
+    z
+      .string()
+      .min(8, 'La contraseña tiene que tener al menos 8 caracteres.')
+      .max(128, 'La contraseña no puede tener más de 128 caracteres.'),
+  );
+
+/** Trim BEFORE validating, or a pasted address with a stray space just fails. */
+const email = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .pipe(z.string().email({ message: 'Ese correo no parece válido. Revisalo.' }));
 
 export const registerSchema = z.object({
-  name: z.string().min(1).max(120).trim(),
+  name: z.string().trim().min(1, 'Escribí tu nombre.').max(120),
   email,
   password,
   // RUC base digits (without the check digit). Optional at registration.
   ruc: z
     .string()
     .trim()
-    .regex(/^\d{3,12}$/, 'RUC must contain only digits')
+    .regex(/^\d{3,12}$/, 'El RUC tiene que tener sólo números, sin puntos ni guiones.')
     .optional(),
   // Check digit (dDVEmi). Required when ruc is provided.
   rucDv: z.coerce.number().int().min(0).max(9).optional(),
@@ -32,7 +53,13 @@ export const updateProfileSchema = z.object({
 
 export const loginSchema = z.object({
   email,
-  password: z.string().min(1),
+  // Same NFC normalisation as registration — without it the login side would
+  // still hash a different byte sequence for the same visible password. No
+  // length rule here: on login the stored password is whatever it is.
+  password: z
+    .string()
+    .min(1, 'Escribí tu contraseña.')
+    .transform((s) => s.normalize('NFC')),
 });
 
 export const googleSchema = z.object({
@@ -48,7 +75,8 @@ export const forgotPasswordSchema = z.object({
 });
 
 export const resetPasswordSchema = z.object({
-  token: z.string().min(10),
+  // The code is pasted from WhatsApp, which loves adding whitespace.
+  token: z.string().trim().min(10, 'Pegá el código completo.'),
   newPassword: password,
 });
 

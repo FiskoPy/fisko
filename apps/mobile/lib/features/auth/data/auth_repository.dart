@@ -120,6 +120,12 @@ class AuthRepository {
     if (status == 401 || status == 403) {
       return AuthFailure(message ?? 'Credenciales inválidas');
     }
+    // A 5xx is never something the user did, and its message is for operators.
+    if (status != null && status >= 500) {
+      return const UnknownFailure(
+        'El servidor tuvo un problema. No es tu internet. Probá de nuevo en unos minutos.',
+      );
+    }
     return UnknownFailure(message ?? 'Ocurrió un error inesperado');
   }
 }

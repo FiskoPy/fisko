@@ -95,7 +95,14 @@ class _ResetPasswordPageState extends ConsumerState<ResetPasswordPage> {
                         ),
                       ),
                       const SizedBox(height: 16),
-                      PasswordField(controller: _password, label: l10n.newPassword),
+                      AutofillGroup(
+                        child: PasswordField(
+                          controller: _password,
+                          label: l10n.newPassword,
+                          textInputAction: TextInputAction.done,
+                          onSubmitted: _submit,
+                        ),
+                      ),
                       const SizedBox(height: 24),
                       FilledButton(
                         onPressed: isSubmitting ? null : _submit,

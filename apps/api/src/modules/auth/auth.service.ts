@@ -75,7 +75,9 @@ export async function register(input: RegisterInput): Promise<AuthResult> {
 
   const existing = await prisma.user.findUnique({ where: { email: input.email } });
   if (existing) {
-    throw AppError.conflict('Email already registered');
+    throw AppError.conflict(
+      'Ya existe una cuenta con ese correo. Entrá con tu contraseña, o tocá «¿Olvidaste tu contraseña?».',
+    );
   }
 
   const passwordHash = await argon2.hash(input.password);
@@ -94,14 +96,18 @@ export async function register(input: RegisterInput): Promise<AuthResult> {
 
 export async function login(input: LoginInput): Promise<AuthResult> {
   const user = await prisma.user.findUnique({ where: { email: input.email } });
-  if (!user || !user.passwordHash) {
-    throw AppError.unauthorized('Invalid credentials');
-  }
+  // One identical message for "no such account", "account has no password
+  // (Google-only)" and "wrong password". Splitting them would let anyone probe
+  // which addresses are registered. The text has to carry that ambiguity.
+  const wrong = () =>
+    AppError.unauthorized(
+      'Correo o contraseña incorrectos. Revisá que no haya espacios de más. ' +
+        'Si no la recordás, tocá «¿Olvidaste tu contraseña?».',
+    );
 
+  if (!user || !user.passwordHash) throw wrong();
   const ok = await argon2.verify(user.passwordHash, input.password);
-  if (!ok) {
-    throw AppError.unauthorized('Invalid credentials');
-  }
+  if (!ok) throw wrong();
 
   return { user: toPublicUser(user), tokens: issueTokenPair(user) };
 }
@@ -154,7 +160,7 @@ export async function refresh(input: RefreshInput): Promise<TokenPair> {
   const user = await prisma.user.findUnique({ where: { id: payload.sub } });
 
   if (!user || user.tokenVersion !== payload.tokenVersion) {
-    throw AppError.unauthorized('Refresh token is no longer valid');
+    throw AppError.unauthorized('Tu sesión venció. Iniciá sesión de nuevo.');
   }
 
   return issueTokenPair(user);
@@ -224,11 +230,19 @@ export async function forgotPassword(input: ForgotPasswordInput): Promise<void> 
 export async function resetPassword(input: ResetPasswordInput): Promise<void> {
   const tokenHash = hashResetToken(input.token);
   const record = await prisma.passwordResetToken.findFirst({
-    where: { tokenHash, usedAt: null, expiresAt: { gt: new Date() } },
+    where: { tokenHash },
   });
 
+  // Three different situations used to share one English sentence, so neither
+  // the user nor support could tell a typo from a code that was already spent.
   if (!record) {
-    throw AppError.badRequest('Invalid or expired reset token');
+    throw AppError.badRequest('Ese c\u00f3digo no es v\u00e1lido. Copialo de nuevo, entero.');
+  }
+  if (record.usedAt) {
+    throw AppError.badRequest('Ese c\u00f3digo ya fue usado. Ped\u00ed uno nuevo.');
+  }
+  if (record.expiresAt <= new Date()) {
+    throw AppError.badRequest('Ese c\u00f3digo venci\u00f3. Los c\u00f3digos duran 1 hora: ped\u00ed uno nuevo.');
   }
 
   const passwordHash = await argon2.hash(input.newPassword);
