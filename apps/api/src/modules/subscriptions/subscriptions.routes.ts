@@ -155,6 +155,18 @@ subscriptionsRouter.post(
     const dbUser = await prisma.user.findUnique({ where: { id: user.sub } });
     if (!dbUser) throw AppError.unauthorized();
 
+    // Pagopar requires `documento` on the buyer and rejects an empty one with
+    // "El documento debe estar presente" — a message the user cannot act on.
+    // We have nothing else to put there: Fisko never asks for a cédula, only
+    // the RUC. Say so plainly, and point at the screen that fixes it (Perfil
+    // can set the RUC since 2026-09-04).
+    if (!dbUser.ruc) {
+      throw AppError.badRequest(
+        'Para suscribirte necesitamos tu RUC. Cargalo en Perfil y volvé a intentar.',
+        { missing: 'ruc' },
+      );
+    }
+
     // Unique per attempt so a retried payment never collides with an old order.
     const idPedido = `fisko-${plan.id}-${dbUser.id.slice(0, 8)}-${Date.now()}`;
     const maxPaymentDate = new Date(Date.now() + 48 * 60 * 60 * 1000);
