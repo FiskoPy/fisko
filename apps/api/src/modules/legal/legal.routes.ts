@@ -16,7 +16,10 @@ export const legalRouter = Router();
 /** Data controller. Override per deployment if the operating entity changes. */
 const EMPRESA = process.env.LEGAL_EMPRESA ?? 'TecBio';
 const RUC = process.env.LEGAL_RUC ?? '80175384-8';
-const CONTACTO = process.env.LEGAL_CONTACT_EMAIL ?? 'fiskopy@gmail.com';
+// fiskopy@gmail.com was the original address; Google blocked that account, so
+// the client moved to fiskoapp@gmail.com. Both stores check that this contact
+// actually receives mail, so a stale default here is a submission failure.
+const CONTACTO = process.env.LEGAL_CONTACT_EMAIL ?? 'fiskoapp@gmail.com';
 
 const ACTUALIZADO = '1 de septiembre de 2026';
 

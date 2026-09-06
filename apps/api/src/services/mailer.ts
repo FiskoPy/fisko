@@ -46,7 +46,7 @@ export interface SendMailInput {
   html?: string;
 }
 
-/** Parses "Fisko <fiskopy@gmail.com>" into { name, email }. */
+/** Parses "Fisko <fiskoapp@gmail.com>" into { name, email }. */
 function parseSender(from: string): { name: string; email: string } {
   const m = from.match(/^\s*(.*?)\s*<([^>]+)>\s*$/);
   if (m && m[2]) return { name: m[1] || 'Fisko', email: m[2] };
