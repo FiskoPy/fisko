@@ -17,6 +17,8 @@ import { logger } from '../lib/logger';
  */
 
 const API = 'https://api.pagopar.com/api/comercios/2.0/iniciar-transaccion';
+/** Order status. Its token is a different digest from the transaction one. */
+const STATUS_API = 'https://api.pagopar.com/api/pedidos/1.1/traer';
 const TIMEOUT_MS = 20_000;
 
 export function isPagoparConfigured(): boolean {
@@ -216,6 +218,79 @@ export async function createCheckout(input: CheckoutInput): Promise<CheckoutResu
     throw AppError.serviceUnavailable(
       'No se pudo conectar con el medio de pago. Probá de nuevo.',
     );
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Digest for the order-status query: sha1(privateToken + "CONSULTA").
+ *
+ * Note it is NOT the transaction digest (which mixes in the order id and the
+ * amount) nor the webhook one (which mixes in the order hash). Pagopar uses
+ * three different formulas; confusing them yields "Token no corresponde".
+ */
+export function orderStatusToken(): string {
+  return createHash('sha1')
+    .update(`${env.PAGOPAR_PRIVATE_TOKEN ?? ''}CONSULTA`, 'utf8')
+    .digest('hex');
+}
+
+export interface OrderStatus {
+  pagado: boolean;
+  cancelado: boolean;
+  monto: number | null;
+  formaPago: string | null;
+  fechaPago: string | null;
+}
+
+/**
+ * Asks Pagopar what happened to an order. Returns null when we cannot get an
+ * answer — the caller must not read that as "not paid".
+ */
+export async function getOrderStatus(hashPedido: string): Promise<OrderStatus | null> {
+  if (!env.PAGOPAR_PRIVATE_TOKEN || !env.PAGOPAR_PUBLIC_TOKEN) return null;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  try {
+    const res = await fetch(STATUS_API, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        hash_pedido: hashPedido,
+        token: orderStatusToken(),
+        token_publico: env.PAGOPAR_PUBLIC_TOKEN,
+      }),
+    });
+
+    const data = (await res.json().catch(() => null)) as {
+      respuesta?: boolean;
+      resultado?: Record<string, unknown>[] | string;
+    } | null;
+
+    if (!res.ok || !data || data.respuesta === false || typeof data.resultado === 'string') {
+      const reason = typeof data?.resultado === 'string' ? data.resultado : null;
+      logger.warn({ status: res.status, reason, hashPedido }, 'Pagopar order query rejected');
+      return null;
+    }
+
+    const row = Array.isArray(data.resultado) ? data.resultado[0] : undefined;
+    if (!row) return null;
+
+    const truthy = (v: unknown) => v === true || v === 'true' || v === '1' || v === 1;
+    const monto = Number(row.monto);
+    return {
+      pagado: truthy(row.pagado),
+      cancelado: truthy(row.cancelado),
+      monto: Number.isFinite(monto) ? monto : null,
+      formaPago: typeof row.forma_pago === 'string' ? row.forma_pago : null,
+      fechaPago: typeof row.fecha_pago === 'string' ? row.fecha_pago : null,
+    };
+  } catch (err) {
+    logger.warn({ err: (err as Error).message, hashPedido }, 'Pagopar order query failed');
+    return null;
   } finally {
     clearTimeout(timer);
   }

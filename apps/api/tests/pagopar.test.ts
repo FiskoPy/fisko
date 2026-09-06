@@ -12,6 +12,7 @@ const PUBLIC = 'test-public-token-0123456789';
 
 let transactionToken: (id: string, monto: number) => string;
 let verifyWebhookToken: (hash: string, received: string) => boolean;
+let orderStatusToken: () => string;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let buildTransactionBody: (input: any) => any;
 let canExportReports: (plan: { invoiceLimit: number | null }, n: number) => boolean;
@@ -24,6 +25,7 @@ beforeAll(async () => {
   const plans = await import('../src/services/plans');
   transactionToken = pagopar.transactionToken;
   verifyWebhookToken = pagopar.verifyWebhookToken;
+  orderStatusToken = pagopar.orderStatusToken;
   buildTransactionBody = pagopar.buildTransactionBody;
   canExportReports = plans.canExportReports as typeof canExportReports;
   PLANS = plans.PLANS as typeof PLANS;
@@ -141,5 +143,23 @@ describe('buildTransactionBody — the shape Pagopar documents', () => {
     const b = buildTransactionBody({ ...input, buyer: { ...input.buyer, ruc: null } });
     expect(b.comprador.ruc).toBe('');
     expect(b.comprador.documento).toBe('');
+  });
+});
+
+describe('orderStatusToken — the third digest', () => {
+  it('is sha1(private + "CONSULTA"), as the order-query endpoint documents', () => {
+    expect(orderStatusToken()).toBe(sha1(`${PRIVATE}CONSULTA`));
+  });
+
+  it('is NOT the transaction digest and NOT the webhook one', () => {
+    // Pagopar uses three different formulas over the same private token.
+    // Reusing the wrong one answers "Token no corresponde", which reads like a
+    // bad credential and sends you looking in the wrong place.
+    expect(orderStatusToken()).not.toBe(transactionToken('CONSULTA', 0));
+    expect(orderStatusToken()).not.toBe(sha1(`${PRIVATE}algun-hash-de-pedido`));
+  });
+
+  it('does not depend on which order is being queried', () => {
+    expect(orderStatusToken()).toBe(orderStatusToken());
   });
 });

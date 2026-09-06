@@ -7,6 +7,7 @@ import { requireAuth, type AuthedRequest } from '../../middleware/auth';
 import { asyncHandler } from '../../utils/async-handler';
 import { PLANS, getPlan, resolveActive } from '../../services/plans';
 import { createCheckout, verifyWebhookToken } from '../../services/pagopar';
+import { creditPaidOrder, reconcileOrder } from './subscriptions.service';
 
 export const subscriptionsRouter = Router();
 
@@ -66,34 +67,12 @@ subscriptionsRouter.post(
       return;
     }
 
-    // Pagopar re-notifies every 10 minutes until it sees a 200, so the same
-    // order can arrive more than once. Key the guard on the order itself —
-    // keying on status ignored a paid upgrade as if it were a repeat.
-    if (sub.paidHashPedido === hashPedido) {
+    // Shared with the order-status path so a payment confirmed either way is
+    // credited identically, and never twice.
+    const outcome = await creditPaidOrder(sub, hashPedido);
+    if (outcome === 'already') {
       logger.info({ hashPedido }, 'pagopar webhook: already credited, ignoring repeat');
-      res.status(200).json(req.body);
-      return;
     }
-
-    // One paid month from now, on the plan this order was for.
-    const now = new Date();
-    const periodEnd = new Date(now);
-    periodEnd.setUTCMonth(periodEnd.getUTCMonth() + 1);
-    const planId = sub.pendingPlanId ?? sub.planId;
-
-    await prisma.subscription.update({
-      where: { id: sub.id },
-      data: {
-        planId,
-        pendingPlanId: null,
-        status: 'active',
-        lastPaymentAt: now,
-        currentPeriodEnd: periodEnd,
-        paidHashPedido: hashPedido,
-      },
-    });
-
-    logger.info({ userId: sub.userId, planId, hashPedido }, 'subscription activated');
     // Pagopar asks merchants to answer with the payload it sent.
     res.status(200).json(req.body);
   }),
@@ -118,6 +97,39 @@ subscriptionsRouter.get(
       plan,
       status: active ? 'active' : (sub?.status ?? 'none'),
       currentPeriodEnd: active ? (sub?.currentPeriodEnd ?? null) : null,
+    });
+  }),
+);
+
+/**
+ * Ask Pagopar directly what happened to the order we opened for this user.
+ *
+ * The webhook is the primary path, but the free tier hibernates and a
+ * notification can be missed, leaving someone who really paid stuck on
+ * "esperando confirmación". This is also step 3 of Pagopar's staging circuit.
+ */
+subscriptionsRouter.post(
+  '/sync',
+  asyncHandler(async (req, res) => {
+    const user = (req as AuthedRequest).user;
+    if (!user) throw AppError.unauthorized();
+
+    const sub = await prisma.subscription.findUnique({ where: { userId: user.sub } });
+    if (!sub?.hashPedido) {
+      res.status(200).json({ checked: false, plan: resolveActive(sub).plan, status: sub?.status ?? 'none' });
+      return;
+    }
+
+    const out = await reconcileOrder(sub.hashPedido);
+    const fresh = await prisma.subscription.findUnique({ where: { userId: user.sub } });
+    const { plan, active } = resolveActive(fresh);
+    res.status(200).json({
+      checked: true,
+      paid: out.paid,
+      cancelled: out.cancelled,
+      plan,
+      status: active ? 'active' : (fresh?.status ?? 'none'),
+      currentPeriodEnd: active ? (fresh?.currentPeriodEnd ?? null) : null,
     });
   }),
 );

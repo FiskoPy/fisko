@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { prisma } from '../../lib/prisma';
 import { asyncHandler } from '../../utils/async-handler';
+import { reconcileOrder } from '../subscriptions/subscriptions.service';
 
 /**
  * Public legal pages, served outside /api/v1 so the URLs read as web pages in
@@ -189,6 +190,12 @@ legalRouter.get(
   '/pago/resultado/:hash?',
   asyncHandler(async (req, res) => {
     const hash = (req.params as { hash?: string }).hash;
+
+    // Ask Pagopar what actually happened rather than trusting only our own row:
+    // the webhook can be late or lost, and the person is standing here now.
+    // This is also step 3 of Pagopar's staging circuit.
+    if (hash) await reconcileOrder(hash).catch(() => undefined);
+
     const sub = hash
       ? await prisma.subscription.findFirst({ where: { hashPedido: hash } })
       : null;
