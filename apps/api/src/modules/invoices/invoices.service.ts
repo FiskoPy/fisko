@@ -294,10 +294,17 @@ export async function importPhoto(userId: string, imageBase64: string) {
       totalIva: iva10 + iva5,
       iva5,
       iva10,
-      // The form prints the IVA, not the taxable base; derive it so the
-      // dashboard's 5/10 split stays consistent with electronic invoices.
-      baseGrav5: iva5 > 0 ? iva5 * 20 : 0,
-      baseGrav10: iva10 > 0 ? iva10 * 10 : 0,
+      // baseGrav is the NET taxable base — the same thing SIFEN calls
+      // dBaseGrav, so the XML and photo paths can be summed together.
+      //
+      // The ticket prints the GROSS amount ("TOTAL GRAVADAS 10%: 545.600"),
+      // which is base + IVA. Subtract when we read it; fall back to deriving
+      // from the tax only when we did not. iva*10 and iva*20 are the correct
+      // multipliers for the NET base (49.600*10 = 496.000 = 545.600 - 49.600).
+      baseGrav5:
+        parsed.gravada5 != null ? Math.max(0, Math.round(parsed.gravada5 - iva5)) : iva5 * 20,
+      baseGrav10:
+        parsed.gravada10 != null ? Math.max(0, Math.round(parsed.gravada10 - iva10)) : iva10 * 10,
       source: 'ocr',
     },
     include: { items: true },

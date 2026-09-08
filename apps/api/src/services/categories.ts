@@ -12,6 +12,7 @@
 
 export type CategoryKey =
   | 'combustible'
+  | 'supermercado'
   | 'alimentacion'
   | 'servicios_basicos'
   | 'telecomunicaciones'
@@ -43,6 +44,26 @@ export function normalizeText(v: string): string {
 // categories are declared before broader ones.
 export const CATEGORIES: CategoryDef[] = [
   {
+    // Declared first deliberately. An invoice from OCR carries no line items,
+    // so the issuer's name is the only signal — which makes the order of these
+    // definitions the whole classification.
+    key: 'supermercado',
+    label: 'Supermercado y despensa',
+    patterns: [
+      // Format words. The optional space survives OCR splitting the word.
+      /\b(super ?mercado|hipermercado|autoservicio|mini ?mercado|mini ?market|despensa|almacen)\b/,
+      // Invented names are safe on their own.
+      /\b(superseis|biggie|salemma|arete|casa rica|nueva americana|los jardines|gran via|supermas|luisito)\b/,
+      // Ordinary words need the format word beside them, or this would swallow
+      // any company called Real, España, Primavera or Continental.
+      /\b(?:super ?mercados?|hipermercado)\s+(?:real|espana|pueblo|fortis|primavera|continental|regional|guarani|central)\b/,
+      /\b(stock\s+(?:express|supermarket|market)|supermercados?\s+stock)\b/,
+      // "SUPER <name>" is the local convention for a grocery store — but not
+      // for SUPER MOTOS or SUPER REPUESTOS.
+      /^(?:super|hiper)\s+(?!moto|auto|repuesto|ferreteria|hierro|deporte|sport|gomeria|neumatico|pollo)[a-z]/,
+    ],
+  },
+  {
     key: 'combustible',
     label: 'Combustible',
     patterns: [
@@ -62,7 +83,10 @@ export const CATEGORIES: CategoryDef[] = [
     key: 'telecomunicaciones',
     label: 'Telecomunicaciones',
     patterns: [
-      /\b(tigo|personal|claro|copaco|vox|telecel|nucleo)\b/,
+      // "personal" and "claro" are ordinary Spanish words; anchor them to the
+      // company or they claim any invoice that happens to use them.
+      /\b(tigo|copaco|vox|telecel|nucleo|amx paraguay)\b/,
+      /\b(claro|personal)\s+(?:paraguay|py|s\.?a\.?)\b/,
       /\b(internet|telefonia|telefono|celular|fibra optica|plan de datos|cable)\b/,
     ],
   },
@@ -70,16 +94,22 @@ export const CATEGORIES: CategoryDef[] = [
     key: 'financiero',
     label: 'Bancos y finanzas',
     patterns: [
-      /\b(banco|bancard|sudameris|itau|continental|regional|vision banco|financiera|cooperativa)\b/,
+      // "continental" and "regional" only count as banks when the word bank is
+      // present: both are also supermarket names here, and this category is
+      // declared before Alimentación, so it used to win.
+      /\b(bancard|sudameris|itau|vision banco|ueno|familiar|atlas|gnb|financiera|cooperativa)\b/,
+      /\bbanco\s+[a-z]/,
       /\b(seguro|seguros|poliza|comision bancaria|interes|prestamo)\b/,
     ],
   },
   {
     key: 'alimentacion',
-    label: 'Alimentación',
+    label: 'Restaurantes y delivery',
     patterns: [
-      /\b(supermercado|superseis|stock|biggie|arete|casa rica|nuevo superseis|salemma)\b/,
-      /\b(restaurante|rotiseria|panaderia|comida|almuerzo|cena|despensa|carniceria|verduleria)\b/,
+      // Supermarkets moved to their own category; this one is eating out.
+      /\b(restaurante|rotiseria|panaderia|confiteria|heladeria|pizzeria|parrilla|lomiteria|hamburgueseria|cafeteria|comedor)\b/,
+      /\b(comida|almuerzo|cena|carniceria|verduleria|fruteria)\b/,
+      /\b(pedidosya|pedidos ya|monchis|delivery)\b/,
     ],
   },
   {

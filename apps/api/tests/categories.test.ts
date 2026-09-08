@@ -21,8 +21,10 @@ describe('categorize — by issuer name', () => {
     ['COPACO S.A.', 'telecomunicaciones'],
     ['SUDAMERIS BANK SAECA', 'financiero'],
     ['BANCO ITAU PARAGUAY S.A.', 'financiero'],
-    ['SUPERSEIS S.A.', 'alimentacion'],
-    ['BIGGIE EXPRESS S.A.', 'alimentacion'],
+    // Supermarkets got their own category on 2026-09-08: the client could not
+    // see his commonest expense while it was folded into Alimentación.
+    ['SUPERSEIS S.A.', 'supermercado'],
+    ['BIGGIE EXPRESS S.A.', 'supermercado'],
     ['FARMACENTER S.A.', 'salud'],
     ['PUNTO FARMA S.A.', 'salud'],
     ['MICROSOFT CORPORATION', 'tecnologia'],
