@@ -281,6 +281,21 @@ export async function importPhoto(userId: string, imageBase64: string) {
     );
   }
 
+  if (parsed.missing.length) {
+    // An import that goes through with fields missing was silent on the
+    // server. On 2026-09-14 a fuel ticket came back with its total but no IVA
+    // and no RUC, and nothing here said which layout defeated the parser.
+    // Same rule as above: the layout only, never the text or the user.
+    logger.warn(
+      {
+        lines: text.split(/\r?\n/).length,
+        missing: parsed.missing,
+        layout: layoutSkeleton(text),
+      },
+      'import-photo: imported with fields missing',
+    );
+  }
+
   const key = receiptKey(parsed);
   const existing = await prisma.invoice.findUnique({
     where: { userId_cdc: { userId, cdc: key } },

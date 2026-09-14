@@ -18,4 +18,13 @@ String formatMoney(num value, String? moneda) {
   return '$code ${_money.format(value)}';
 }
 
+/// An instant — when something happened on the server — in the phone's zone.
 String formatDate(DateTime d) => _date.format(d.toLocal());
+
+/// The date printed on a document: a calendar day, not an instant.
+///
+/// The API stores an invoice's own wall-clock date tagged UTC — midnight for a
+/// photographed invoice, and SIFEN's offset-less dFeEmiDE parsed on a UTC
+/// server — and groups months in UTC too. Rendering it in the phone's zone
+/// moved every photographed invoice to the day before in Paraguay (UTC-3).
+String formatDocDate(DateTime d) => _date.format(d.toUtc());

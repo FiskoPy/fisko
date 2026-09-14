@@ -77,7 +77,7 @@ class _Detail extends StatelessWidget {
         Text('RUC ${inv.emisorRuc}${inv.emisorDv != null ? '-${inv.emisorDv}' : ''}'),
         const SizedBox(height: 8),
         _row('Tipo', tipoDocLabel(inv.tipoDoc, inv.tipoDocDesc)),
-        _row('Fecha', formatDate(inv.fechaEmision)),
+        _row('Fecha', formatDocDate(inv.fechaEmision)),
         if (inv.receptorNombre != null) _row('Receptor', inv.receptorNombre!),
         _row('CDC', inv.cdc, mono: true),
         const Divider(height: 24),

@@ -210,7 +210,7 @@ class _InvoiceTile extends StatelessWidget {
       ),
       title: Text(invoice.emisorNombre, maxLines: 1, overflow: TextOverflow.ellipsis),
       subtitle: Text(
-        '${tipoDocLabel(invoice.tipoDoc, invoice.tipoDocDesc)} · ${formatDate(invoice.fechaEmision)}',
+        '${tipoDocLabel(invoice.tipoDoc, invoice.tipoDocDesc)} · ${formatDocDate(invoice.fechaEmision)}',
       ),
       trailing: Text(
         formatMoney(invoice.totalOpe, invoice.moneda),
