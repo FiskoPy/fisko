@@ -53,6 +53,60 @@ describe('GET /eliminar-cuenta', () => {
   });
 });
 
+describe('GET /privacidad names where the data actually lives', () => {
+  it('names Supabase for storage since the move off Render Postgres', async () => {
+    // The database moved to Supabase on 2026-09-11; the page kept saying
+    // "gestionada por Render" until the store/Pagopar review pass caught it.
+    const { text } = await request(app).get('/privacidad');
+    expect(text).toContain('Supabase');
+  });
+});
+
+describe('GET / — the sales channel Pagopar asked for', () => {
+  it('serves an HTML page at the root instead of a JSON 404', async () => {
+    const res = await request(app).get('/');
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toMatch(/text\/html/);
+  });
+
+  it('quotes the plans and the prices the checkout charges', async () => {
+    const { text } = await request(app).get('/');
+    for (const name of ['Gratis', 'Básico', 'Pro', 'Empresarial']) expect(text).toContain(name);
+    expect(text).toContain('Gs 59.900');
+    expect(text).toContain('Gs 119.900');
+  });
+
+  it('says how payment works and who operates the service', async () => {
+    const { text } = await request(app).get('/');
+    expect(text).toContain('Pagopar');
+    expect(text).toContain('TecBio');
+    expect(text).toContain('80175384-8');
+  });
+
+  it('links the terms, privacy and deletion pages', async () => {
+    const { text } = await request(app).get('/');
+    for (const href of ['/terminos', '/privacidad', '/eliminar-cuenta']) {
+      expect(text).toContain(`href="${href}"`);
+    }
+  });
+});
+
+describe('GET /terminos', () => {
+  it('serves the terms page', async () => {
+    const res = await request(app).get('/terminos');
+    expect(res.status).toBe(200);
+    expect(res.text).toContain('Términos y condiciones');
+  });
+
+  it('states billing, renewal, cancellation and refunds — what a payment processor checks', async () => {
+    const { text } = await request(app).get('/terminos');
+    expect(text).toContain('Pagopar');
+    expect(text).toContain('No hay débito automático');
+    expect(text).toContain('Reembolsos');
+    expect(text).toMatch(/no es asesoría contable/i);
+  });
+});
+
 describe('legal pages and the rest of the app', () => {
   it('does not let helmet block the inline stylesheet', async () => {
     // The pages carry their CSS inline; if style-src ever loses 'unsafe-inline'

@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { prisma } from '../../lib/prisma';
 import { asyncHandler } from '../../utils/async-handler';
 import { reconcileOrder } from '../subscriptions/subscriptions.service';
+import { PLANS } from '../../services/plans';
 
 /**
  * Public legal pages, served outside /api/v1 so the URLs read as web pages in
@@ -21,7 +22,7 @@ const RUC = process.env.LEGAL_RUC ?? '80175384-8';
 // actually receives mail, so a stale default here is a submission failure.
 const CONTACTO = process.env.LEGAL_CONTACT_EMAIL ?? 'fiskoapp@gmail.com';
 
-const ACTUALIZADO = '1 de septiembre de 2026';
+const ACTUALIZADO = '14 de septiembre de 2026';
 
 const page = (titulo: string, cuerpo: string): string => `<!doctype html>
 <html lang="es">
@@ -47,10 +48,18 @@ const page = (titulo: string, cuerpo: string): string => `<!doctype html>
   a { color:var(--azul); }
   footer { margin-top:3rem; padding-top:1.25rem; border-top:1px solid var(--borde);
            color:var(--gris); font-size:.875rem; }
+  footer nav { margin-bottom:.5rem; }
+  .planes { display:grid; gap:1rem; grid-template-columns:repeat(auto-fit,minmax(14rem,1fr)); margin:1rem 0; }
+  .plan { border:1px solid var(--borde); border-radius:12px; padding:1rem 1.1rem; }
+  .plan h3 { margin:0 0 .25rem; font-size:1.05rem; }
+  .precio { font-size:1.35rem; font-weight:700; margin:0; }
+  .precio small { font-size:.8rem; font-weight:400; color:var(--gris); }
+  .plan ul { margin:.6rem 0 0; }
 </style>
 </head>
 <body><main>${cuerpo}
-<footer>${EMPRESA} — RUC ${RUC}<br>Contacto: <a href="mailto:${CONTACTO}">${CONTACTO}</a></footer>
+<footer><nav><a href="/">Fisko</a> · <a href="/terminos">Términos</a> · <a href="/privacidad">Privacidad</a> · <a href="/eliminar-cuenta">Eliminar cuenta</a></nav>
+${EMPRESA} — RUC ${RUC}<br>Contacto: <a href="mailto:${CONTACTO}">${CONTACTO}</a></footer>
 </main></body></html>`;
 
 legalRouter.get('/privacidad', (_req, res) => {
@@ -106,8 +115,9 @@ de datos personales.</p>
 comerciales.</p>
 
 <h2>Dónde se guardan</h2>
-<p>Los datos se almacenan en una base de datos gestionada por <strong>Render</strong>, con servidores
-en los Estados Unidos, y los correos de recuperación se envían mediante <strong>Brevo</strong>. Para
+<p>Los datos se almacenan en una base de datos gestionada por <strong>Supabase</strong> y la
+aplicación se sirve desde <strong>Render</strong>, ambos con servidores en los Estados Unidos; los
+correos de recuperación se envían mediante <strong>Brevo</strong>. Para
 funciones puntuales intervienen además <strong>Google Cloud Vision</strong> (lectura de fotos),
 <strong>OpenAI</strong> (redacción de la proyección de IVA, sólo con montos agregados) y
 <strong>Pagopar</strong> (cobro de suscripciones, en Paraguay). Esto implica una transferencia
@@ -221,3 +231,137 @@ Podés intentarlo de nuevo desde la app.</p>`;
     res.type('html').send(page(paid ? 'Plan activo' : 'Pago recibido', body));
   }),
 );
+
+/** "Gs 59.900" — a fixed format, independent of the server's ICU data. */
+const gs = (n: number): string =>
+  'Gs ' + String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+
+/**
+ * The public front door: what Fisko is, what it costs and how to buy it.
+ *
+ * Pagopar asked for a "canal de venta" before enabling virtual products and
+ * subscriptions, and the root of this host answered a JSON 404 — which is
+ * what a payment processor's reviewer would have opened. Prices come from the
+ * same catalogue the app and the checkout use, so this page cannot quote a
+ * price the checkout does not charge.
+ */
+legalRouter.get('/', (_req, res) => {
+  const planes = PLANS.map((p) => {
+    const precio =
+      p.priceGs != null
+        ? `${gs(p.priceGs)} <small>por mes</small>`
+        : p.id === 'gratis'
+          ? 'Sin costo'
+          : 'A convenir';
+    const items = p.features.map((f) => `<li>${f}</li>`).join('');
+    return `<div class="plan"><h3>${p.name}</h3><p class="precio">${precio}</p><ul>${items}</ul></div>`;
+  }).join('\n');
+
+  res.type('html').send(
+    page(
+      'Gestión fiscal para Paraguay',
+      `<h1>Fisko</h1>
+<p class="fecha">Tu gestión fiscal en Paraguay, sin planillas.</p>
+
+<p>Fisko reúne tus facturas electrónicas y de papel, calcula tu IVA 5% y 10% y te arma los
+reportes para tu declaración. Es una aplicación móvil operada por <strong>${EMPRESA}</strong>
+(RUC ${RUC}).</p>
+
+<h2>Qué hace</h2>
+<ul>
+  <li>Importa sola las facturas electrónicas (XML del SIFEN) que te llegan al correo.</li>
+  <li>Lee las facturas de papel a partir de una foto.</li>
+  <li>Te muestra el IVA 5% y 10%, tus ventas y compras, y una estimación del IRP.</li>
+  <li>Genera reportes en PDF y Excel, listos para compartir con tu contador.</li>
+  <li>Te avisa sobre tu IVA acumulado y su vencimiento.</li>
+</ul>
+
+<h2>Planes</h2>
+<div class="planes">
+${planes}
+</div>
+<p>Precios mensuales, en guaraníes. El plan Gratis no pide tarjeta.</p>
+
+<h2>Cómo contratar</h2>
+<ol>
+  <li>Descargá la app Fisko y creá tu cuenta.</li>
+  <li>En <em>Perfil → Mi plan</em>, elegí el plan.</li>
+  <li>Pagás en la página segura de <strong>Pagopar</strong>, con los medios de pago que ofrece.
+      Tus datos de pago no pasan por Fisko.</li>
+  <li>El plan se activa al confirmarse el pago y dura un mes. No hay débito automático.</li>
+</ol>
+<p>Detalles de cobro, cancelación y reembolsos en los
+<a href="/terminos">términos y condiciones</a>.</p>
+
+<h2>Descargar</h2>
+<p>Fisko está en su etapa final de pruebas. Muy pronto en Google Play y en la App Store.</p>`,
+    ),
+  );
+});
+
+/**
+ * Terms of service, including billing, cancellation and refunds — what a
+ * payment processor checks before enabling subscriptions, and what the stores
+ * expect to find for a paid app.
+ *
+ * The renewal wording follows the implementation: a payment credits one month
+ * and nothing is charged again automatically (see creditPaidOrder). If that
+ * ever changes, this page must change with it.
+ */
+legalRouter.get('/terminos', (_req, res) => {
+  res.type('html').send(
+    page(
+      'Términos y condiciones',
+      `<h1>Términos y condiciones</h1>
+<p class="fecha">Última actualización: ${ACTUALIZADO}</p>
+
+<p>Estos términos regulan el uso de Fisko, aplicación de gestión fiscal operada por
+<strong>${EMPRESA}</strong> (RUC ${RUC}). Al crear una cuenta los aceptás.</p>
+
+<h2>El servicio</h2>
+<p>Fisko organiza tus comprobantes, calcula el IVA y genera reportes a partir de los datos que vos
+cargás o que importamos de tu correo. Es una herramienta de apoyo: <strong>no es asesoría contable
+ni tributaria</strong> y no reemplaza tus obligaciones ante la DNIT ni el trabajo de tu contador.
+Revisá siempre los montos antes de usarlos en una declaración.</p>
+
+<h2>Tu cuenta</h2>
+<p>Sos responsable de la información que cargás y de mantener tu contraseña en reserva. Podés
+<a href="/eliminar-cuenta">eliminar tu cuenta</a> cuando quieras.</p>
+
+<h2>Planes y precios</h2>
+<p>El plan Gratis no tiene costo. Los planes pagos se cobran por mes, en guaraníes, al precio
+publicado en la aplicación y en <a href="/">nuestra página</a> al momento de contratar.</p>
+
+<h2>Pagos</h2>
+<p>Los cobros los procesa <strong>Pagopar</strong>. Ingresás tus datos de pago en su plataforma;
+Fisko no los recibe ni los guarda.</p>
+
+<h2>Duración y renovación</h2>
+<p>Cada pago habilita el plan por <strong>un mes</strong> desde que se confirma.
+<strong>No hay débito automático</strong>: para continuar, volvés a pagar desde la app. Si no lo
+hacés, la cuenta pasa al plan Gratis y tus facturas se conservan.</p>
+
+<h2>Cancelación</h2>
+<p>Como no hay renovación automática, no hace falta cancelar nada: basta con no volver a pagar. El
+plan sigue activo hasta el final del mes ya pagado.</p>
+
+<h2>Reembolsos</h2>
+<ul>
+  <li>Si pagaste y el plan <strong>no se activó</strong>, o se te cobró <strong>dos veces</strong>
+      por el mismo período, te devolvemos el importe.</li>
+  <li>Fuera de esos casos, no se reembolsan meses ya iniciados.</li>
+  <li>Para pedirlo, escribinos a <a href="mailto:${CONTACTO}">${CONTACTO}</a> dentro de los
+      30 días del cobro, con el comprobante de Pagopar.</li>
+</ul>
+
+<h2>Disponibilidad</h2>
+<p>Hacemos lo posible por mantener Fisko disponible y sus cálculos correctos, pero pueden existir
+interrupciones o errores de lectura, por ejemplo en fotos de facturas. Revisá los datos
+importados.</p>
+
+<h2>Cambios</h2>
+<p>Si cambiamos estos términos o los precios, lo avisaremos en la aplicación antes de que se
+apliquen a un nuevo período.</p>`,
+    ),
+  );
+});
