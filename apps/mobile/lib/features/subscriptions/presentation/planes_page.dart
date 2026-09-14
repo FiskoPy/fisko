@@ -65,6 +65,13 @@ class _PlanesPageState extends ConsumerState<PlanesPage> {
       appBar: AppBar(title: const Text('Planes')),
       body: RefreshIndicator(
         onRefresh: () async {
+          // Reconcile with Pagopar first, so a paid plan shows even when the
+          // webhook that normally credits it has not arrived yet.
+          try {
+            await ref.read(subscriptionApiProvider).sync();
+          } catch (_) {
+            // Nothing pending, or offline — the re-read below still runs.
+          }
           ref.invalidate(plansProvider);
           ref.invalidate(mySubscriptionProvider);
         },

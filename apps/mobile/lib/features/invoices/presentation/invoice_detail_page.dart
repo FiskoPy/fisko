@@ -81,9 +81,15 @@ class _Detail extends StatelessWidget {
         if (inv.receptorNombre != null) _row('Receptor', inv.receptorNombre!),
         _row('CDC', inv.cdc, mono: true),
         const Divider(height: 24),
-        _row('Base gravada 5%', formatMoney(inv.baseGrav5, inv.moneda)),
+        // The paper prints the GROSS amount as "TOTAL GRAVADAS" (IVA
+        // included); what the app stores as the base is the NET one, as SIFEN
+        // does. Showing only the net under "Base gravada" invited a comparison
+        // with the ticket that could never match, so show both, labelled.
+        _row('Total gravado 5% (con IVA)', formatMoney(inv.baseGrav5 + inv.iva5, inv.moneda)),
+        _row('Base imponible 5% (sin IVA)', formatMoney(inv.baseGrav5, inv.moneda)),
         _row('IVA 5%', formatMoney(inv.iva5, inv.moneda)),
-        _row('Base gravada 10%', formatMoney(inv.baseGrav10, inv.moneda)),
+        _row('Total gravado 10% (con IVA)', formatMoney(inv.baseGrav10 + inv.iva10, inv.moneda)),
+        _row('Base imponible 10% (sin IVA)', formatMoney(inv.baseGrav10, inv.moneda)),
         _row('IVA 10%', formatMoney(inv.iva10, inv.moneda)),
         _row('Total IVA', formatMoney(inv.totalIva, inv.moneda)),
         const SizedBox(height: 8),

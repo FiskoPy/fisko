@@ -101,6 +101,16 @@ class SubscriptionApi {
     );
     return res.data!['redirectUrl'] as String;
   }
+
+  /// Asks the server to check the pending order with Pagopar directly.
+  ///
+  /// The webhook is what normally activates a plan, but the server sleeps on
+  /// the free tier and a notification can arrive late; a user who paid would
+  /// sit on "Gratis" until Pagopar retried. Pull-to-refresh on Planes calls
+  /// this, so paying and then refreshing is enough.
+  Future<void> sync() async {
+    await _dio.post<Map<String, dynamic>>('/subscriptions/sync');
+  }
 }
 
 final subscriptionApiProvider =

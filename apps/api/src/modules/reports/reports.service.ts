@@ -233,9 +233,9 @@ export async function buildPdf(summary: FiscalSummary): Promise<Buffer> {
   doc.fontSize(13).fillColor(BRAND).text('IVA');
   doc.moveDown(0.3);
   // Same colour discipline as the app: green is always 5%, amber always 10%.
-  line('Base gravada 5%', fmtGs(summary.baseGrav5));
+  line('Base imponible 5% (sin IVA)', fmtGs(summary.baseGrav5));
   line('IVA 5%', fmtGs(summary.iva5), false, IVA5);
-  line('Base gravada 10%', fmtGs(summary.baseGrav10));
+  line('Base imponible 10% (sin IVA)', fmtGs(summary.baseGrav10));
   line('IVA 10%', fmtGs(summary.iva10), false, IVA10);
   line('Total IVA', fmtGs(summary.totalIva), true);
   doc.moveDown(0.6);
@@ -293,9 +293,9 @@ export async function buildExcel(summary: FiscalSummary): Promise<Buffer> {
   const add = (c: string, v: number) => ws.addRow({ c, v: Math.round(v) });
   add('Comprobantes', summary.count);
   add('Total operaciones', summary.totalOpe);
-  add('Base gravada 5%', summary.baseGrav5);
+  add('Base imponible 5% (sin IVA)', summary.baseGrav5);
   add('IVA 5%', summary.iva5);
-  add('Base gravada 10%', summary.baseGrav10);
+  add('Base imponible 10% (sin IVA)', summary.baseGrav10);
   add('IVA 10%', summary.iva10);
   add('Total IVA', summary.totalIva);
   add('Ventas (ingresos)', summary.ventas);
