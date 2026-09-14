@@ -1,5 +1,6 @@
 import type { Invoice, InvoiceItem, Prisma } from '@prisma/client';
 import { prisma } from '../../lib/prisma';
+import { logger } from '../../lib/logger';
 import { AppError } from '../../errors/app-error';
 import { parseDte, isValidCdcCheckDigit } from '../../services/sifen';
 import { extractText, MAX_IMAGE_BYTES } from '../../services/ocr';
@@ -260,6 +261,20 @@ export async function importPhoto(userId: string, imageBase64: string) {
   const parsed: ParsedReceipt = parseReceipt(text);
 
   if (parsed.total == null) {
+    // Keep what Vision actually returned. Three real photos failed here on
+    // 2026-09-13 and the only record was "400" — the layout that defeated the
+    // parser was unrecoverable. Logged only on failure, and truncated: this is
+    // the user's own invoice, but it should not sit in logs any longer than a
+    // diagnosis needs.
+    logger.warn(
+      {
+        userId,
+        lines: text.split(/\r?\n/).length,
+        missing: parsed.missing,
+        ocr: text.slice(0, 1500),
+      },
+      'import-photo: no total found in OCR text',
+    );
     throw AppError.badRequest(
       'No pudimos leer el total de la factura. Sacá la foto más de cerca, ' +
         'con buena luz y la factura plana sobre una superficie oscura.',

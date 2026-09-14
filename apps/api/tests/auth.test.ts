@@ -104,17 +104,22 @@ describe('login + me + refresh + logout', () => {
 });
 
 describe('forgot + reset password', () => {
-  it('always returns 200 for forgot-password, and resets with a valid token', async () => {
+  it('answers a known and an unknown address identically, and rejects a bad token', async () => {
+    // No mail provider in this environment, so forgot-password answers an
+    // honest 503 (since 2026-08) instead of a 200 whose e-mail never leaves.
+    // The property that matters holds either way: a registered and an
+    // unregistered address get the SAME answer, or the endpoint would reveal
+    // who has an account. This test was written when the answer was always
+    // 200 and never ran — the suite was skipped for lack of a database.
     const forgot = await request(app)
       .post(`${base}/auth/forgot-password`)
       .send({ email: userEmail });
-    expect(forgot.status).toBe(200);
+    expect([200, 503]).toContain(forgot.status);
 
-    // Unknown email also returns 200 (anti-enumeration).
     const unknown = await request(app)
       .post(`${base}/auth/forgot-password`)
       .send({ email: `nobody_${stamp}@example.com` });
-    expect(unknown.status).toBe(200);
+    expect(unknown.status).toBe(forgot.status);
 
     // Read the raw token is not possible (only the hash is stored), so to test
     // reset end-to-end we recreate a token via the same hashing the service uses.

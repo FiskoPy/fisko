@@ -84,6 +84,26 @@ function lastNumber(line: string): number | null {
   return m ? parseAmount(m[1] as string) : null;
 }
 
+/**
+ * A line that is nothing but an amount, optionally with a currency token.
+ *
+ * Cloud Vision reads a receipt by blocks, and on a two-column footer it often
+ * emits the label on one line and its value on the next:
+ *     TOTAL A PAGAR
+ *     Gs 587.600
+ * The first parser rewrite assumed both sat on one line — the fixtures were
+ * reconstructed by hand that way — and real photos were rejected for "no
+ * total". Only a line with no other words qualifies, so the NEXT label's number
+ * is never borrowed.
+ */
+function amountOnly(line: string | undefined): number | null {
+  if (!line) return null;
+  const m = line.match(
+    /^\s*(?:g\s*s\.?|g\$|₲)?\s*[:.]?\s*(\d{1,3}(?:\.\d{3})+(?:,\d+)?|\d+(?:,\d+)?)\s*$/i,
+  );
+  return m ? parseAmount(m[1] as string) : null;
+}
+
 /** RUC as printed: 5-8 digits plus a check digit. */
 function findRuc(text: string): { ruc: string; dv: number } | null {
   const m = text.match(/(?<![\d-])(\d{5,8})\s*[-–]\s*(\d)(?![\d-])/);
@@ -130,10 +150,21 @@ function collectLabelled(lines: string[]): Labelled[] {
       ? true
       : /liquidac/.test(low);
 
+    let found = false;
     for (const m of line.matchAll(re)) {
       const value = parseAmount(m[2] as string);
       if (value == null) continue;
       out.push({ rate: Number(m[1]) as 5 | 10, value, index, liquidacion });
+      found = true;
+    }
+
+    // Label and rate on this line, amount on the next (see amountOnly).
+    if (!found) {
+      const rate = line.match(/(?<!\d)0?(10|5)\s*%/);
+      const value = rate ? amountOnly(lines[index + 1]) : null;
+      if (rate && value != null) {
+        out.push({ rate: Number(rate[1]) as 5 | 10, value, index, liquidacion });
+      }
     }
   });
   return out;
@@ -242,12 +273,13 @@ const TOTAL_LABELS: [RegExp, number][] = [
 function readTotal(lines: string[]): number | null {
   let best: { rank: number; value: number } | null = null;
 
-  lines.forEach((line) => {
+  lines.forEach((line, i) => {
     const low = norm(line);
     if (NOT_TOTAL.test(low)) return;
     const hit = TOTAL_LABELS.find(([re]) => re.test(low));
     if (!hit) return;
-    const value = lastNumber(line);
+    // Same line first; failing that, a next line holding only the amount.
+    const value = lastNumber(line) ?? amountOnly(lines[i + 1]);
     if (value == null || value <= 0) return;
     // Later wins on a tie: the payable total is printed below the breakdown.
     if (!best || hit[1] >= best.rank) best = { rank: hit[1], value };
