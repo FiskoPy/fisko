@@ -452,3 +452,35 @@ export function receiptKey(p: ParsedReceipt): string {
   ];
   return `OCR:${parts.join(':')}`;
 }
+
+/** Labels kept verbatim in a layout skeleton; everything else is masked. */
+const LAYOUT_KEYWORDS = new Set([
+  'total', 'totales', 'sub', 'subtotal', 'a', 'pagar', 'importe', 'neto',
+  'gravada', 'gravadas', 'gravado', 'exenta', 'exentas', 'iva', 'liquidacion',
+  'impuesto', 'gs', 'fecha', 'hora', 'ruc', 'timbrado', 'factura', 'nombre',
+  'contado', 'credito', 'redondeo', 'descuento', 'del', 'de',
+]);
+
+/**
+ * The layout of an OCR text with its content removed — safe to log.
+ *
+ * Diagnosing a parse failure needs the SHAPE: which label sits on which line
+ * and where the numbers fall. It does not need the values, and a receipt's
+ * text carries the buyer's name and CI/RUC. So fiscal keywords survive
+ * verbatim, every other word becomes "w" and every digit "9":
+ *     "Nombre: ALBERTO VELAZQUEZ"  ->  "nombre: w w"
+ *     "TOTAL GS: 223.150"          ->  "total gs: 999.999"
+ * Letters are matched as Unicode letters, so an accented name cannot leak a
+ * character through an ASCII-only pattern.
+ */
+export function layoutSkeleton(text: string, maxChars = 1500): string {
+  return text
+    .split(/\r?\n/)
+    .map((line) =>
+      line
+        .replace(/\d/g, '9')
+        .replace(/\p{L}+/gu, (word) => (LAYOUT_KEYWORDS.has(norm(word)) ? norm(word) : 'w')),
+    )
+    .join('\n')
+    .slice(0, maxChars);
+}

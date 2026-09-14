@@ -4,7 +4,7 @@ import { logger } from '../../lib/logger';
 import { AppError } from '../../errors/app-error';
 import { parseDte, isValidCdcCheckDigit } from '../../services/sifen';
 import { extractText, MAX_IMAGE_BYTES } from '../../services/ocr';
-import { parseReceipt, receiptKey, type ParsedReceipt } from '../../services/receipt-parser';
+import { layoutSkeleton, parseReceipt, receiptKey, type ParsedReceipt } from '../../services/receipt-parser';
 import { normalizeRuc } from '../../utils/ruc';
 
 type InvoiceWithItems = Invoice & { items: InvoiceItem[] };
@@ -261,17 +261,17 @@ export async function importPhoto(userId: string, imageBase64: string) {
   const parsed: ParsedReceipt = parseReceipt(text);
 
   if (parsed.total == null) {
-    // Keep what Vision actually returned. Three real photos failed here on
-    // 2026-09-13 and the only record was "400" — the layout that defeated the
-    // parser was unrecoverable. Logged only on failure, and truncated: this is
-    // the user's own invoice, but it should not sit in logs any longer than a
-    // diagnosis needs.
+    // Three real photos failed here on 2026-09-13 and the only record was
+    // "400", so the layout that defeated the parser was unrecoverable. Log the
+    // layout, then — but ONLY the layout: a receipt's text carries the buyer's
+    // name and CI/RUC, and Render keeps these logs outside our control. The
+    // skeleton keeps fiscal labels and number shapes and masks everything
+    // else, and no user id rides on the same line.
     logger.warn(
       {
-        userId,
         lines: text.split(/\r?\n/).length,
         missing: parsed.missing,
-        ocr: text.slice(0, 1500),
+        layout: layoutSkeleton(text),
       },
       'import-photo: no total found in OCR text',
     );
