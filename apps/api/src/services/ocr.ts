@@ -1,6 +1,7 @@
 import { env } from '../config/env';
 import { AppError } from '../errors/app-error';
 import { logger } from '../lib/logger';
+import { layoutsOf, type VisionAnnotation } from './vision-layout';
 
 /**
  * Google Cloud Vision — text from a photographed paper invoice.
@@ -25,7 +26,18 @@ export function isOcrConfigured(): boolean {
   return Boolean(env.GOOGLE_VISION_API_KEY);
 }
 
-export async function extractText(imageBase64: string): Promise<string> {
+/** What a photo says. */
+export interface OcrText {
+  /** Vision's own text, which follows its blocks. */
+  text: string;
+  /**
+   * The readings to weigh: the same words rebuilt into the printed rows, in
+   * more than one way, and Vision's own text (see vision-layout's layoutsOf).
+   */
+  layouts: { layout: string; text: string | null }[];
+}
+
+export async function extractText(imageBase64: string): Promise<OcrText> {
   if (!env.GOOGLE_VISION_API_KEY) {
     throw AppError.serviceUnavailable(
       'La lectura de fotos no está habilitada en este servidor.',
@@ -73,7 +85,7 @@ export async function extractText(imageBase64: string): Promise<string> {
 
     const data = (await res.json()) as {
       responses?: {
-        fullTextAnnotation?: { text?: string };
+        fullTextAnnotation?: VisionAnnotation;
         error?: { message?: string };
       }[];
     };
@@ -90,7 +102,15 @@ export async function extractText(imageBase64: string): Promise<string> {
         'No encontramos texto en la foto. Sacá la foto más de cerca, con buena luz y la factura plana.',
       );
     }
-    return text;
+    // The rebuilt rows are an improvement, never a requirement: if the
+    // geometry trips anything, the photo is still read in Vision's order.
+    let layouts: OcrText['layouts'] = [{ layout: 'blocks', text }];
+    try {
+      layouts = layoutsOf(first?.fullTextAnnotation);
+    } catch (err) {
+      logger.warn({ err: (err as Error).message }, 'Vision layout could not be rebuilt');
+    }
+    return { text, layouts };
   } catch (err) {
     if (err instanceof AppError) throw err;
     const aborted = (err as Error).name === 'AbortError';

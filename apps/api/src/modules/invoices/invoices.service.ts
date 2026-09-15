@@ -4,7 +4,14 @@ import { logger } from '../../lib/logger';
 import { AppError } from '../../errors/app-error';
 import { parseDte, isValidCdcCheckDigit } from '../../services/sifen';
 import { extractText, MAX_IMAGE_BYTES } from '../../services/ocr';
-import { layoutSkeleton, parseReceipt, receiptKey, type ParsedReceipt } from '../../services/receipt-parser';
+import {
+  docDigits,
+  layoutSkeleton,
+  parseBest,
+  receiptKey,
+  type ParsedReceipt,
+  type Reading,
+} from '../../services/receipt-parser';
 import { normalizeRuc } from '../../utils/ruc';
 
 type InvoiceWithItems = Invoice & { items: InvoiceItem[] };
@@ -111,6 +118,82 @@ export interface ImportOptions {
   expectRuc?: string | null;
 }
 
+/**
+ * The document number a CDC encodes — digits 12 to 24 — when it is an invoice
+ * (type 01). Other document types are numbered apart, so they never match.
+ */
+function cdcDocDigits(cdc: string): string | null {
+  return /^01\d{42}$/.test(cdc) ? cdc.slice(11, 24) : null;
+}
+
+/** Two stored dates on the same calendar day (both are kept as UTC days). */
+const sameDay = (a: Date, b: Date): boolean => a.toISOString().slice(0, 10) === b.toISOString().slice(0, 10);
+
+/**
+ * Photos stored for this XML's invoice: under its CDC (a KuDE whose CDC was
+ * read), or as the same issuer's same document number (one whose CDC was not).
+ *
+ * These are deleted, and a deletion is not undone: the same number under a
+ * new timbrado is another invoice. So a number match also needs the photo to
+ * carry the XML's date or its total.
+ */
+async function photosOf(
+  userId: string,
+  dte: { cdc: string; emisorRuc: string; fechaEmision: Date; totalOpe: number },
+): Promise<string[]> {
+  const doc = cdcDocDigits(dte.cdc);
+  const stored = await prisma.invoice.findMany({
+    where: { userId, source: 'ocr', OR: [{ cdc: dte.cdc }, { emisorRuc: dte.emisorRuc }] },
+    select: { id: true, cdc: true, emisorRuc: true, numeroDoc: true, fechaEmision: true, totalOpe: true },
+  });
+  return stored
+    .filter(
+      (i) =>
+        i.cdc === dte.cdc ||
+        (doc != null &&
+          i.emisorRuc === dte.emisorRuc &&
+          i.numeroDoc != null &&
+          docDigits(i.numeroDoc) === doc &&
+          (sameDay(i.fechaEmision, dte.fechaEmision) || Math.round(n(i.totalOpe)) === Math.round(dte.totalOpe))),
+    )
+    .map((i) => i.id);
+}
+
+/**
+ * An invoice already stored that this photo shows again: under one of these
+ * keys, or — whatever its source — as the issuer's same document number. A
+ * retake that reads the total differently is still the same invoice, and so
+ * is a KuDE whose XML came by mail.
+ */
+async function findSameInvoice(userId: string, parsed: ParsedReceipt, keys: string[]) {
+  const byKey = await prisma.invoice.findFirst({
+    where: { userId, cdc: { in: keys } },
+    select: { id: true },
+  });
+  if (byKey) return byKey;
+
+  const doc = parsed.numeroDoc ? docDigits(parsed.numeroDoc) : null;
+  if (!parsed.emisorRuc || !doc) return null;
+  const sameIssuer = await prisma.invoice.findMany({
+    where: { userId, emisorRuc: parsed.emisorRuc },
+    select: { id: true, cdc: true, numeroDoc: true, timbrado: true, fechaEmision: true, totalOpe: true },
+  });
+  return (
+    sameIssuer.find((i) => {
+      if ((i.numeroDoc ? docDigits(i.numeroDoc) : cdcDocDigits(i.cdc)) !== doc) return false;
+      // The same number under a new timbrado is another invoice. But any one
+      // field can be misread on a retake, and a duplicate counts the IVA
+      // twice: it takes two fields that both differ to call it another one.
+      const differ = [
+        i.timbrado != null && parsed.timbrado != null && i.timbrado !== parsed.timbrado,
+        parsed.fechaEmision != null && !sameDay(i.fechaEmision, parsed.fechaEmision),
+        parsed.total != null && Math.round(n(i.totalOpe)) !== Math.round(parsed.total),
+      ].filter(Boolean).length;
+      return differ < 2;
+    }) ?? null
+  );
+}
+
 export async function importXml(
   userId: string,
   xml: string,
@@ -132,13 +215,17 @@ export async function importXml(
 
   const existing = await prisma.invoice.findUnique({
     where: { userId_cdc: { userId, cdc: dte.cdc } },
-    select: { id: true },
+    select: { id: true, source: true },
   });
-  if (existing) {
+  if (existing && existing.source !== 'ocr') {
     throw AppError.conflict('Esta factura ya fue importada', { cdc: dte.cdc });
   }
+  // A photo of this same invoice is replaced, not kept beside it: the XML is
+  // the invoice itself — SIFEN's own amounts, with its items — and keeping
+  // both would count its IVA twice.
+  const photos = await photosOf(userId, dte);
 
-  const created = await prisma.invoice.create({
+  const create = prisma.invoice.create({
     data: {
       userId,
       cdc: dte.cdc,
@@ -177,6 +264,9 @@ export async function importXml(
     },
     include: { items: true },
   });
+  const created = photos.length
+    ? (await prisma.$transaction([prisma.invoice.deleteMany({ where: { id: { in: photos } } }), create]))[1]
+    : await create;
 
   return toPublicInvoice(created);
 }
@@ -243,7 +333,9 @@ export interface ImportPhotoResult {
  *
  * A paper invoice has no CDC, so `cdc` holds a synthetic key derived from
  * issuer + document number + date + total: photographing the same invoice
- * twice deduplicates instead of creating a second record. What the form
+ * twice deduplicates instead of creating a second record. A KuDE — the
+ * printed copy of an electronic invoice — is the exception: it carries its
+ * CDC, and is stored under it, so its XML is recognised as the same invoice. What the form
  * actually prints goes into timbrado/numeroDoc.
  *
  * Anything the OCR could not read is reported in `missing` rather than
@@ -257,8 +349,20 @@ export async function importPhoto(userId: string, imageBase64: string) {
     );
   }
 
-  const text = await extractText(imageBase64);
-  const parsed: ParsedReceipt = parseReceipt(text);
+  // Several readings of the same words — the printed rows rebuilt from where
+  // each word sits, and Vision's own block order — and keep the one whose
+  // numbers add up: a wrong layout pairs labels with the wrong amounts (see
+  // layoutsOf and parseBest). Vision's text is never empty here.
+  const ocr = await extractText(imageBase64);
+  const { parsed, text, layout } = (parseBest(ocr.layouts) ??
+    parseBest([{ layout: 'blocks', text: ocr.text }])) as Reading;
+
+  if (parsed.nota) {
+    throw AppError.badRequest(
+      `Las notas de ${parsed.nota === 'credito' ? 'crédito' : 'débito'} todavía no se cargan por foto. ` +
+        'Importá su XML.',
+    );
+  }
 
   if (parsed.total == null) {
     // Three real photos failed here on 2026-09-13 and the only record was
@@ -270,6 +374,7 @@ export async function importPhoto(userId: string, imageBase64: string) {
     logger.warn(
       {
         lines: text.split(/\r?\n/).length,
+        reading: layout,
         missing: parsed.missing,
         layout: layoutSkeleton(text),
       },
@@ -281,6 +386,64 @@ export async function importPhoto(userId: string, imageBase64: string) {
     );
   }
 
+  if (parsed.totalsAgree === false) {
+    // The amounts contradict each other — the total against gravadas plus
+    // exentas, or an IVA against its own gravada — so one of them is misread
+    // and nothing says which. Storing it put a Gs 223.150 ticket on record as
+    // Gs 29 (2026-09-15). Same logging rule as above.
+    logger.warn(
+      {
+        lines: text.split(/\r?\n/).length,
+        reading: layout,
+        missing: parsed.missing,
+        layout: layoutSkeleton(text),
+      },
+      'import-photo: amounts contradict each other',
+    );
+    throw AppError.badRequest(
+      'Los montos de la factura no cuadran entre sí, así que no la guardamos. ' +
+        'Sacá la foto de nuevo, bien derecha, con buena luz y la factura plana.',
+    );
+  }
+
+  if (parsed.missing.includes('IVA')) {
+    // No IVA read at all — and the IVA is what this record is for. Stored
+    // anyway, a photo showed "Gs 0" on every tax line (a diesel ticket,
+    // 2026-09-14) and read as a purchase without IVA. An exempt-only invoice
+    // is not refused: the parser does not report its IVA as missing.
+    logger.warn(
+      {
+        lines: text.split(/\r?\n/).length,
+        reading: layout,
+        missing: parsed.missing,
+        layout: layoutSkeleton(text),
+      },
+      'import-photo: no IVA found in OCR text',
+    );
+    throw AppError.badRequest(
+      'No pudimos leer el IVA de la factura. Sacá la foto de nuevo, que se vea ' +
+        'bien el pie con la liquidación del IVA.',
+    );
+  }
+
+  if (parsed.fechaEmision == null) {
+    // Stored anyway, it took the day of the upload and landed in the wrong
+    // month's IVA. Same logging rule as above.
+    logger.warn(
+      {
+        lines: text.split(/\r?\n/).length,
+        reading: layout,
+        missing: parsed.missing,
+        layout: layoutSkeleton(text),
+      },
+      'import-photo: no date found in OCR text',
+    );
+    throw AppError.badRequest(
+      'No pudimos leer la fecha de la factura. Sacá la foto de nuevo, que se vea ' +
+        'bien la fecha de emisión.',
+    );
+  }
+
   if (parsed.missing.length) {
     // An import that goes through with fields missing was silent on the
     // server. On 2026-09-14 a fuel ticket came back with its total but no IVA
@@ -289,6 +452,7 @@ export async function importPhoto(userId: string, imageBase64: string) {
     logger.warn(
       {
         lines: text.split(/\r?\n/).length,
+        reading: layout,
         missing: parsed.missing,
         layout: layoutSkeleton(text),
       },
@@ -296,11 +460,15 @@ export async function importPhoto(userId: string, imageBase64: string) {
     );
   }
 
-  const key = receiptKey(parsed);
-  const existing = await prisma.invoice.findUnique({
-    where: { userId_cdc: { userId, cdc: key } },
-  });
-  if (existing) throw AppError.conflict('Esta factura ya fue importada');
+  // A KuDE keys by its printed CDC — what the XML of the same invoice carries;
+  // anything else by issuer, number, date and total.
+  const key = parsed.cdc ?? receiptKey(parsed);
+  const existing = await findSameInvoice(userId, parsed, [key, receiptKey(parsed)]);
+  if (existing) {
+    throw AppError.conflict(
+      'Esta factura ya fue importada. Si quedó mal, borrala y sacá la foto de nuevo.',
+    );
+  }
 
   const iva10 = parsed.iva10 ?? 0;
   const iva5 = parsed.iva5 ?? 0;
@@ -310,13 +478,13 @@ export async function importPhoto(userId: string, imageBase64: string) {
       userId,
       cdc: key,
       tipoDoc: 1, // Factura
-      tipoDocDesc: 'Factura (papel)',
+      tipoDocDesc: parsed.cdc ? 'Factura electrónica (foto)' : 'Factura (papel)',
       emisorRuc: parsed.emisorRuc ?? '',
       emisorDv: parsed.emisorDv,
       emisorNombre: parsed.emisorNombre ?? 'Sin identificar',
       receptorRuc: parsed.receptorRuc,
       receptorNombre: parsed.receptorNombre,
-      fechaEmision: parsed.fechaEmision ?? new Date(),
+      fechaEmision: parsed.fechaEmision,
       moneda: 'PYG',
       timbrado: parsed.timbrado,
       numeroDoc: parsed.numeroDoc,

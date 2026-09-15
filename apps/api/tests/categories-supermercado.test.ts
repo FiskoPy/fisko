@@ -38,6 +38,18 @@ describe('supermarkets are their own category', () => {
   });
 });
 
+describe('the neighbourhood "MERCADO"', () => {
+  it('classifies the shop the client photographed on 2026-09-15', () => {
+    expect(categorize('MINAS281 MERCADO')).toBe('supermercado');
+  });
+
+  it('leaves the marketplace and the wallet of the same name alone', () => {
+    for (const name of ['MERCADO LIBRE PARAGUAY', 'Mercado Pago S.A.']) {
+      expect(categorize(name), name).not.toBe('supermercado');
+    }
+  });
+});
+
 describe('names that must NOT become supermarkets', () => {
   it('leaves "SUPER" businesses that sell something else alone', () => {
     for (const name of ['SUPER MOTOS S.A.', 'SUPER REPUESTOS DEL ESTE', 'SUPER POLLO']) {

@@ -58,6 +58,9 @@ export const CATEGORIES: CategoryDef[] = [
       // any company called Real, España, Primavera or Continental.
       /\b(?:super ?mercados?|hipermercado)\s+(?:real|espana|pueblo|fortis|primavera|continental|regional|guarani|central)\b/,
       /\b(stock\s+(?:express|supermarket|market)|supermercados?\s+stock)\b/,
+      // "MERCADO" alone is the neighbourhood-shop format ("MINAS281 MERCADO"),
+      // but not Mercado Libre or Mercado Pago.
+      /\bmercado\b(?!\s+(?:libre|pago))/,
       // "SUPER <name>" is the local convention for a grocery store — but not
       // for SUPER MOTOS or SUPER REPUESTOS.
       /^(?:super|hiper)\s+(?!moto|auto|repuesto|ferreteria|hierro|deporte|sport|gomeria|neumatico|pollo)[a-z]/,
