@@ -167,6 +167,15 @@ function amountOnly(line: string | undefined): number | null {
   return m ? parseAmount(m[1] as string) : null;
 }
 
+/** The first amount printed after a label on its line. */
+function firstNumberAfter(low: string, label: RegExp): number | null {
+  const at = low.match(label);
+  if (!at) return null;
+  const rest = low.slice((at.index ?? 0) + at[0].length);
+  const m = rest.match(/(\d{1,3}(?:\.\d{3})+(?:,\d+)?|\d+(?:,\d+)?)/);
+  return m ? parseAmount(m[1] as string) : null;
+}
+
 /** RUC as printed: 5-8 digits plus a check digit. */
 function findRuc(text: string): { ruc: string; dv: number } | null {
   const m = text.match(/(?<![\d-])(\d{5,8})\s*[-–]\s*(\d)(?![\d-])/);
@@ -711,8 +720,17 @@ export function parseReceipt(text: string): ParsedReceipt {
         : null;
   const cdc = nota ? null : readCdc(printed, emisor?.ruc ?? null, numeroDoc, fechaEmision);
 
-  const exentasLine = lines.find((l) => /exent/i.test(norm(l)));
-  const exentas = exentasLine ? lastNumber(exentasLine) : null;
+  // "Exentas 300.000 0": a KuDE prints the amount and then its IVA column, so
+  // the LAST number on that line is the tax, not the exempt amount — read as
+  // the last, a Gs 300.000 exempt fuel invoice came to nothing and was
+  // refused. The first amount after the label, or the next line when the
+  // label stands alone.
+  const exentasIndex = lines.findIndex((l) => /exent/i.test(norm(l)));
+  const exentas =
+    exentasIndex >= 0
+      ? (firstNumberAfter(norm(lines[exentasIndex] as string), /exent\w*/) ??
+        amountOnly(lines[exentasIndex + 1]))
+      : null;
 
   // The best-ranked total, checked against the footer's own arithmetic. There
   // is deliberately no search for a lower-ranked total that "fits": one such

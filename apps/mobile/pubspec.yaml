@@ -1,7 +1,7 @@
 name: fisko
 description: Fisko — gestión fiscal para contribuyentes paraguayos.
 publish_to: "none"
-version: 0.3.1+4
+version: 0.3.2+5
 
 environment:
   sdk: ">=3.4.0 <4.0.0"

@@ -15,7 +15,10 @@ String friendlyError(Object e) {
     // an English server string reached a Spanish-only app.
     final data = e.response?.data;
     if (data is Map && data['error'] is Map && data['error']['message'] != null) {
-      const generic = {'INTERNAL', 'NOT_FOUND', 'TOO_MANY_REQUESTS'};
+      // TOO_MANY_REQUESTS used to be generic, so a user who hit the daily
+      // photo cap of their plan saw "demasiados intentos" and thought the app
+      // had lost their invoice. The server's message names the real limit.
+      const generic = {'INTERNAL', 'NOT_FOUND'};
       final code = data['error']['code']?.toString() ?? '';
       if (!generic.contains(code)) {
         return data['error']['message'].toString();

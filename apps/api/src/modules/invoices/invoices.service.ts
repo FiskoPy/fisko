@@ -381,8 +381,8 @@ export async function importPhoto(userId: string, imageBase64: string) {
       'import-photo: no total found in OCR text',
     );
     throw AppError.badRequest(
-      'No pudimos leer el total de la factura. Sacá la foto más de cerca, ' +
-        'con buena luz y la factura plana sobre una superficie oscura.',
+      'No pudimos leer el total de la factura. Sacá una foto por factura, de ' +
+        'cerca, con buena luz y la factura plana sobre una superficie oscura.',
     );
   }
 
@@ -402,7 +402,8 @@ export async function importPhoto(userId: string, imageBase64: string) {
     );
     throw AppError.badRequest(
       'Los montos de la factura no cuadran entre sí, así que no la guardamos. ' +
-        'Sacá la foto de nuevo, bien derecha, con buena luz y la factura plana.',
+        'Sacá la foto de nuevo: una sola factura por foto, bien derecha, con ' +
+        'buena luz y el papel plano.',
     );
   }
 

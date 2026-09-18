@@ -34,7 +34,12 @@ export const PLANS: Plan[] = [
     priceGs: null,
     invoiceLimit: 5,
     ocrPerDay: 3,
-    features: ['Hasta 5 facturas por mes', 'Captura por correo', 'Dashboard de IVA'],
+    features: [
+      'Hasta 5 facturas por mes',
+      'Captura por correo',
+      '3 fotos de facturas por día',
+      'Dashboard de IVA',
+    ],
     checkout: 'contacto',
   },
   {
@@ -46,7 +51,7 @@ export const PLANS: Plan[] = [
     features: [
       'Hasta 50 facturas por mes',
       'Captura por correo',
-      'Foto de facturas de papel',
+      '10 fotos de facturas por día',
       'Reportes PDF y Excel',
     ],
     checkout: 'pagopar',
@@ -60,6 +65,7 @@ export const PLANS: Plan[] = [
     features: [
       'Hasta 300 facturas por mes',
       'Todo lo del plan Básico',
+      '30 fotos de facturas por día',
       'Alertas de IVA y proyección',
     ],
     checkout: 'pagopar',
@@ -70,7 +76,12 @@ export const PLANS: Plan[] = [
     priceGs: null, // "desde Gs 299.900" — negotiated
     invoiceLimit: null,
     ocrPerDay: 200,
-    features: ['Facturas ilimitadas', 'Todo lo del plan Pro', 'Soporte prioritario'],
+    features: [
+      'Facturas ilimitadas',
+      'Todo lo del plan Pro',
+      '200 fotos de facturas por día',
+      'Soporte prioritario',
+    ],
     checkout: 'contacto',
   },
 ];

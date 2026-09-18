@@ -464,6 +464,38 @@ describe('agreement is exact, but for the gaps that really occur', () => {
   });
 });
 
+describe('a footer printed in two columns (the amount, then its IVA)', () => {
+  it('reads the exempt amount, not the zero in the IVA column beside it', () => {
+    // A cooperative's fuel KuDE, 2026-09-16: "Exentas 300.000 0". Taken as the
+    // last number on the line, the invoice came to nothing and was refused.
+    const p = parseReceipt(
+      lines(
+        'KuDE de Factura Electrónica',
+        'COOP. COLONIAS UNIDAS AGROP. IND. LTDA.',
+        'RUC: 80017198-5',
+        'Factura Electrónica N° : 005-005-0155739',
+        'Fecha y Hora de Emisión: 16/09/2026 13:06:55',
+        'Total a Pagar Gs: 300.000',
+        'Liquidaciones del IVA',
+        'Impuesto Importe IVA',
+        'Gravadas 10% 0 0',
+        'Gravadas 5% 0 0',
+        'Exentas 300.000 0',
+        'Total IVA 0',
+      ),
+    );
+    expect(p.exentas).toBe(300_000);
+    expect(p.total).toBe(300_000);
+    expect(p.iva10).toBe(0);
+    expect(p.totalsAgree).toBe(true);
+    expect(p.missing).toEqual([]);
+  });
+
+  it('still reads an exempt line that prints only its amount', () => {
+    expect(parseReceipt(lines('TOTAL: 50.000', 'TOTAL EXENTAS.....: Gs 50.000')).exentas).toBe(50_000);
+  });
+});
+
 describe('percentages and "incluido" on total lines', () => {
   it('does not take a line that kept only its percent sign', () => {
     expect(parseReceipt(lines('TOTAL %: Gs 47.500', 'LIQUIDACION IVA 10%: Gs 4.318')).total).toBeNull();

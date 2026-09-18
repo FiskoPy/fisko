@@ -1,3 +1,5 @@
+import { inflateRawSync } from 'node:zlib';
+
 import { ImapFlow } from 'imapflow';
 import { simpleParser } from 'mailparser';
 import { logger } from '../lib/logger';
@@ -38,15 +40,67 @@ function looksLikeSifenXml(filename: string | undefined, content: string): boole
 }
 
 /**
- * Parses a raw RFC822 e-mail and returns every attachment that is a SIFEN DTE
- * XML. Pure (no network) — testable with a fixture message.
+ * Parses a raw RFC822 e-mail and returns every SIFEN DTE XML it carries —
+ * attached loose, or inside a ZIP. Pure (no network) — testable with a fixture message.
  */
+/** A ZIP's own magic number, for an attachment whose name does not say so. */
+const isZip = (filename: string | undefined, data: Buffer): boolean =>
+  (filename ?? '').toLowerCase().endsWith('.zip') ||
+  (data.length > 4 && data.readUInt32LE(0) === 0x04034b50);
+
+/**
+ * The files inside a ZIP, read from its local headers.
+ *
+ * Many Paraguayan sellers mail the DTE as "factura.zip" rather than as loose
+ * XML, and the capture found nothing in those mailboxes. Deliberately small
+ * and bounded: a handful of entries, a few MB each, and an entry that does not
+ * read — encrypted, sizes in a trailing descriptor, an unsupported method — is
+ * skipped rather than failing the whole message.
+ */
+function unzipEntries(buf: Buffer, maxEntries = 20, maxBytes = 5 * 1024 * 1024): Buffer[] {
+  const out: Buffer[] = [];
+  let at = 0;
+  while (at + 30 <= buf.length && out.length < maxEntries) {
+    if (buf.readUInt32LE(at) !== 0x04034b50) break;
+    const flags = buf.readUInt16LE(at + 6);
+    const method = buf.readUInt16LE(at + 8);
+    const compressed = buf.readUInt32LE(at + 18);
+    const uncompressed = buf.readUInt32LE(at + 22);
+    const nameLen = buf.readUInt16LE(at + 26);
+    const extraLen = buf.readUInt16LE(at + 28);
+    const start = at + 30 + nameLen + extraLen;
+    if ((flags & 0x08) !== 0 || compressed === 0xffffffff) break;
+    const body = buf.subarray(start, start + compressed);
+    if (uncompressed <= maxBytes && body.length === compressed) {
+      try {
+        out.push(
+          method === 0 ? Buffer.from(body) : inflateRawSync(body, { maxOutputLength: maxBytes }),
+        );
+      } catch {
+        // Unreadable entry: the rest of the archive may still hold the XML.
+      }
+    }
+    at = start + compressed;
+  }
+  return out;
+}
+
 export async function extractSifenXmls(rawSource: Buffer | string): Promise<CapturedXml[]> {
   const parsed = await simpleParser(rawSource);
   const out: CapturedXml[] = [];
 
   for (const att of parsed.attachments ?? []) {
-    const content = att.content?.toString('utf8') ?? '';
+    const data = att.content ?? Buffer.alloc(0);
+    if (isZip(att.filename, data)) {
+      unzipEntries(data).forEach((entry, i) => {
+        const content = entry.toString('utf8');
+        if (looksLikeSifenXml('entry.xml', content)) {
+          out.push({ filename: (att.filename ?? 'factura.zip') + '#' + String(i + 1), xml: content });
+        }
+      });
+      continue;
+    }
+    const content = data.toString('utf8');
     if (looksLikeSifenXml(att.filename, content)) {
       out.push({ filename: att.filename ?? 'factura.xml', xml: content });
     }
