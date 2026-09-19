@@ -272,6 +272,41 @@ describe('the model alone is held to what Vision saw', () => {
     });
   });
 
+  it('refuses a taxed invoice the model called fully exempt', () => {
+    // Exentas absorbs the whole total and still adds up, so no arithmetic
+    // objects: the page has to carry the word. Otherwise a Gs 237.500 invoice
+    // taxed at 10% goes on record with no IVA at all.
+    const asExempt = fromExtraction(
+      answer({ exentas: 237_500, gravada5: null, gravada10: null, iva5: 0, iva10: 0, totalIva: 0 }),
+    );
+    expect(asExempt.totalsAgree).toBe(true);
+    expect(asExempt.missing).not.toContain('IVA'); // exempt-only reads as complete
+    expect(witnessed(asExempt, TEXT, BUYER).seen).toBe(false);
+    // The genuinely exempt invoice says so on the paper.
+    expect(witnessed(asExempt, `${TEXT}\nTOTAL EXENTAS: 237.500`, BUYER).seen).toBe(true);
+  });
+
+  it('compares the amounts even when the model lost its date', () => {
+    // witnessed() drops a date the text does not show, which used to make the
+    // whole reading "unsound" and quietly skip the comparison — so a model
+    // reading that contradicted the parser was ignored instead of refusing.
+    const { parsed, text } = photo('minas281-ticket');
+    const contradicting = model('minas281', {
+      fecha: '2026-09-20', // not printed anywhere: witnessed drops it
+      total: 91_000,
+      gravada5: 44_425,
+      gravada10: 46_575,
+      iva10: 4_234,
+      totalIva: 6_349,
+    });
+    expect(witnessed(contradicting, text, BUYER).reading.fechaEmision).toBeNull();
+    expect(decidePhoto(parsed, contradicting, text, BUYER)).toMatchObject({
+      kind: 'refuse',
+      reason: 'lecturas',
+      detail: 'amounts',
+    });
+  });
+
   it('refuses amounts the text does not show, however well they add up', () => {
     const invented = answer({ total: 240_000, gravada10: 206_500, iva10: 18_773, totalIva: 20_368 });
     const reading = fromExtraction(invented);
@@ -342,6 +377,39 @@ describe('the model alone is held to what Vision saw', () => {
     expect(swapped.reading.receptorRuc).toBe(BUYER);
   });
 
+  it('turns it back around by the buyer the parser read, with no RUC on the profile', () => {
+    // Most users have no RUC saved. The receptor block of the page names the
+    // buyer just as well, and filing him as the issuer makes the purchase a
+    // sale — its IVA moves from credit to debit.
+    const swapped = fromExtraction(
+      answer({ emisorRuc: BUYER, emisorDv: 9, emisorNombre: 'XXXXX XXXXX', receptorRuc: '80054993', receptorNombre: 'VIELA S.A.', cdc: null }),
+    );
+    const asRead = { ...parseReceipt(TEXT), receptorRuc: BUYER } as ParsedReceipt;
+    const { reading } = witnessed(swapped, `${TEXT}\nCI: 1111111-9`, null, asRead);
+    expect(reading).toMatchObject({ emisorRuc: '80054993', emisorNombre: 'VIELA S.A.', receptorRuc: BUYER });
+  });
+
+  it('leaves the issuer unread when nothing says which party the model named', () => {
+    const single = fromExtraction(
+      answer({ emisorRuc: BUYER, emisorDv: 9, emisorNombre: 'XXXXX XXXXX', receptorRuc: null, cdc: null }),
+    );
+    const blind = { ...parseReceipt(TEXT), emisorRuc: null, receptorRuc: null } as ParsedReceipt;
+    const { reading } = witnessed(single, `${TEXT}\nCI: 1111111-9`, null, blind);
+    expect(reading.emisorRuc).toBeNull();
+    expect(reading.missing).toContain('RUC del emisor');
+  });
+
+  it("files the name that goes with the RUC, not the other party's", () => {
+    // The model swapped the parties and its own RUC was dropped, so only its
+    // receptorNombre belongs to the RUC being filed.
+    const ocr = { ...parseReceipt(TEXT), emisorRuc: '80054993', emisorDv: 7, emisorNombre: null } as ParsedReceipt;
+    const swapped = fromExtraction(
+      answer({ emisorRuc: null, emisorDv: null, emisorNombre: 'CLIENTE COMPRADOR', receptorRuc: '80054993', receptorNombre: 'VIELA S.A.', cdc: null }),
+    );
+    const decision = decidePhoto(ocr, swapped, TEXT, BUYER);
+    expect(decision.reading?.emisorNombre).not.toBe('CLIENTE COMPRADOR');
+  });
+
   it('turns the invoice back around when the model names the buyer as the issuer', () => {
     const swapped = witnessed(
       fromExtraction(answer({ emisorRuc: BUYER, emisorDv: 9, emisorNombre: 'XXXXX XXXXX', receptorRuc: '80054993', receptorNombre: 'VIELA S.A.', cdc: null })),
@@ -398,6 +466,38 @@ describe('reading the text for what it shows', () => {
     expect(dateSeen(talonario.text, new Date(Date.UTC(2026, 8, 16)))).toBe(true);
     expect(dateSeen(talonario.text, new Date(Date.UTC(2026, 2, 31)))).toBe(false); // vigencia
     expect(dateSeen(talonario.text, new Date(Date.UTC(2027, 2, 31)))).toBe(false); // fin de vigencia
+  });
+
+  it('refuses a date whose rival label the rebuilt rows left on the line above', () => {
+    // The same split that puts "Emisión." above its date puts "Fecha Inicio
+    // Vigencia" above its own, and an unlabelled date has nothing else to go
+    // on. Filed as the emission date, a September purchase lands in March.
+    const rows = (visionFixture('baratao-talonario').text ?? '').split('\n');
+    const split = [...rows.slice(0, 19), 'Fecha Inicio Vigencia', '31/03/2026', ...rows.slice(20)].join('\n');
+    expect(dateSeen(split, new Date(Date.UTC(2026, 2, 31)))).toBe(false);
+    expect(dateSeen('VENCIMIENTO\n30/11/2026\nTOTAL 160.000', new Date(Date.UTC(2026, 10, 30)))).toBe(false);
+    // …but a labelled emission date beside a due date is still the emission date.
+    expect(
+      dateSeen('FECHA DE EMISIÓN: 18/08/2026\nVENCIMIENTO 18/09/2026', new Date(Date.UTC(2026, 7, 18))),
+    ).toBe(true);
+  });
+
+  it('refuses the dates of other documents and other events on the page', () => {
+    const day = (y: number, m: number, d: number) => new Date(Date.UTC(y, m - 1, d));
+    // "remisión" ends in "emisi": a delivery note's date is not this invoice's.
+    expect(dateSeen('NOTA DE REMISIÓN: 0004521 05/09/2026', day(2026, 9, 5))).toBe(false);
+    expect(dateSeen('NOTA DE REMISION\n05/09/2026', day(2026, 9, 5))).toBe(false);
+    // The block the buyer signs and dates, on a credit invoice.
+    expect(dateSeen('Recibí conforme las mercaderías\nFecha 20/10/2026\nFirma del Cliente', day(2026, 10, 20))).toBe(false);
+    // How a due date is abbreviated in practice.
+    for (const line of ['VTO. 30/11/2026', 'VENC.: 30/11/2026', 'Vcto 30/11/2026', 'EXPIRA 30/11/2026', 'V. 30/11/2026']) {
+      expect(`${line} -> ${dateSeen(`FACTURA\n${line}\nTOTAL 160.000`, day(2026, 11, 30))}`).toBe(`${line} -> false`);
+    }
+    // …without refusing an emission date printed beside a timbrado, a street
+    // address or an issuer whose name happens to start with "FABRICA".
+    expect(dateSeen('TIMBRADO: 18479784 FECHA: 02/09/2026', day(2026, 9, 2))).toBe(true);
+    expect(dateSeen('FABRICA DE PASTAS S.A.\nFECHA DE EMISIÓN: 02/09/2026', day(2026, 9, 2))).toBe(true);
+    expect(dateSeen('AV. MCAL LOPEZ 1234\nFECHA DE EMISIÓN: 02/09/2026', day(2026, 9, 2))).toBe(true);
   });
 
   it('reads a date however it is printed', () => {

@@ -700,6 +700,43 @@ describe('a gap that is not a rounding', () => {
     }
   });
 
+  it('gives a zero rate no slack of its own', () => {
+    // A gravada derived from an IVA of zero is exact, so it earns none of the
+    // rounding tolerance a real IVA does — which was hiding a 50 Gs gap.
+    const p = parseReceipt(
+      lines('TOTAL A PAGAR 160.000', 'GRAVADAS 10%: 160.050', 'IVA 5%: 0', 'IVA 10%: 14.550'),
+    );
+    expect(p.derived).not.toContain('gravada5');
+    expect(p.totalsAgree).toBe(false);
+  });
+
+  it("does not take a delivery note's date for the invoice's", () => {
+    // "remisión" ends in "emisión": the date beside it scored as a labelled
+    // emission date, and on a page with no other date it was the one read.
+    const p = parseReceipt(
+      lines(
+        'ALMACEN SAN JOSE',
+        'RUC: 80054993-7',
+        'NOTA DE REMISIÓN: 0004521 05/09/2026',
+        'TOTAL A PAGAR 160.000',
+        'IVA 10%: 14.545',
+      ),
+    );
+    expect(p.fechaEmision).toBeNull();
+    // With its own date printed, that one is read.
+    const q = parseReceipt(
+      lines(
+        'ALMACEN SAN JOSE',
+        'RUC: 80054993-7',
+        'NOTA DE REMISIÓN: 0004521 05/09/2026',
+        'FECHA DE EMISIÓN: 18/08/2026',
+        'TOTAL A PAGAR 160.000',
+        'IVA 10%: 14.545',
+      ),
+    );
+    expect(q.fechaEmision?.toISOString().slice(0, 10)).toBe('2026-08-18');
+  });
+
   it('still reads the talonario as printed', () => {
     const p = parseReceipt(
       lines('TOTAL A PAGAR 160.000', '0 14.545 14.545', 'LIQUIDACIÓN DEL I.V.A.: (5%) (10%) T.IVA:'),

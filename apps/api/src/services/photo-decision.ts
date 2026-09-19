@@ -42,6 +42,21 @@ export function refusalOf(p: ParsedReceipt): Refusal | null {
   return null;
 }
 
+/**
+ * Whether a reading's AMOUNTS stand on their own, whatever its identifiers
+ * say. witnessed() drops a date, a RUC or a name the text does not show and
+ * never touches the figures, so a reading it stripped of its date still has
+ * something to say about the amounts — and either contradicts the other
+ * reader or does not.
+ */
+export function amountsSound(p: ParsedReceipt): boolean {
+  if (p.nota || p.total == null || p.totalsAgree === false) return false;
+  if (p.foreignCurrency && p.tipoCambio == null) return false;
+  // With no tax figure there is nothing to compare: sameAmounts reads a null
+  // IVA as zero and would refuse a total the two readers agree on.
+  return !p.missing.includes('IVA');
+}
+
 const unitOf = (p: ParsedReceipt): number => (p.foreignCurrency ? 0.01 : 1);
 
 /** Whether two sound readings name the same invoice amounts. */
@@ -155,9 +170,17 @@ function misread(printed: Set<string>, word: string): boolean {
 
 const MONTHS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'se', 'oct', 'nov', 'dic'];
 
-/** A line that says this date is when the invoice was issued, and one that says it is not. */
-const EMISSION = /fecha|emisi|emitid|expedi/i;
-const RIVAL = /vencim|vence|caduc|validez|v[áa]lid|vigencia|entrega|nacimiento|inicio|hasta|desde|fab\b|lote/i;
+/**
+ * A line that says this date is when the invoice was issued, and lines that
+ * say it is anything else — due, valid from, made on, delivered on, or the
+ * date of a nota de remisión, whose "remisión" the emission pattern itself
+ * would otherwise match.
+ */
+const EMISSION = /(?:^|\P{L})(?:fecha|emisi|emitid|expedi)/iu;
+const RIVAL =
+  /v(?:to|cto|enc)\b|\bv\.\s*\d|vencim|vence|caduc|validez|v[áa]lid|vigencia|expir|entrega|remis|remitid|nacimiento|inicio|hasta|desde|elab|fab\b|fabricaci|lote/i;
+/** The acknowledgement block at the foot: what the buyer signs and dates. */
+const FOOT = /firma|aclaraci|recib[ií]|conforme/i;
 
 /** Any date printed in the text, in the ways invoices print one. */
 const ANY_DATE = /(?<!\d)(\d{1,2}\s*[/.-]\s*\d{1,2}\s*[/.-]\s*\d{2,4}|\d{4}\s*[/.-]\s*\d{1,2}\s*[/.-]\s*\d{1,2})(?!\d)/g;
@@ -189,21 +212,35 @@ export function dateSeen(text: string, date: Date): boolean {
   lines.forEach((line, i) => {
     if (patterns.some((p) => p.test(line))) at.push(i);
   });
-  // Lines that call this date something else are out from the start.
-  const own = at.filter((i) => !RIVAL.test(lines[i] as string));
+  const near = (i: number) => [lines[i - 1] ?? '', lines[i] ?? '', lines[i + 1] ?? ''].join(' | ');
+  // Lines that call this date something else are out from the start, and so is
+  // anything standing in the block the buyer signs and dates: a credit invoice
+  // has him write there the day he received the goods, in another month.
+  const own = at.filter((i) => !RIVAL.test(lines[i] as string) && !FOOT.test(near(i)));
   if (!own.length) return false;
 
   // Printed under a label that calls it the emission date…
   if (own.some((i) => EMISSION.test(lines[i] as string))) return true;
-  // …or under one that the rebuilt rows left on the line above or below it,
-  // as a KuDE's "Emisión." and its date end up ("01/09/2026 17:48").
-  const near = (i: number) => [lines[i - 1] ?? '', lines[i] ?? '', lines[i + 1] ?? ''].join(' | ');
-  if (own.some((i) => EMISSION.test(near(i)) && !RIVAL.test(near(i)))) return true;
+  // …or under a bare label the rebuilt rows left on the line above or below —
+  // a short line that is only a label and carries no value of its own, as a
+  // KuDE's "Emisión." is, with "01/09/2026 17:48" beneath it. A paragraph that
+  // merely contains the word is not one.
+  const bareLabel = (s: string) => {
+    const label = s.trim();
+    return label.length <= 30 && EMISSION.test(label) && !/\d/.test(label);
+  };
+  if (
+    own.some((i) => [lines[i - 1] ?? '', lines[i + 1] ?? ''].some(bareLabel) && !RIVAL.test(near(i)))
+  ) {
+    return true;
+  }
 
   // …or unlabelled, as a talonario prints it ("16 DE SEPTIEMBRE DE 2026"):
-  // only when no other date could be taken for it instead. A date the page
-  // itself calls something else — a vigencia, a vencimiento, a lot's — is not
-  // one of those.
+  // only when nothing else could be taken for it. With no label of its own it
+  // has nothing to go on, so a rival label one row away — left there by the
+  // same rebuilt rows that leave "Emisión." above its date — disqualifies it,
+  // and so does any other date the page does not name.
+  if (!own.some((i) => !RIVAL.test(near(i)))) return false;
   const others = lines
     .filter((line) => !RIVAL.test(line))
     .flatMap((line) => [...line.matchAll(ANY_DATE)].map((m) => m[0]))
@@ -243,6 +280,7 @@ export function witnessed(
   ai: ParsedReceipt,
   text: string,
   ownRuc: string | null = null,
+  ocr: ParsedReceipt | null = null,
 ): { reading: ParsedReceipt; seen: boolean } {
   const cents = printedAmounts(text);
   const shown = (v: number | null) => v == null || v === 0 || cents.has(Math.round(v * 100));
@@ -263,6 +301,12 @@ export function witnessed(
   // A gravada worked out from a printed IVA is the other way round, and safe:
   // the tax figure is the one that was read.
   const gravada = (k: 'gravada5' | 'gravada10') => ai.derived.includes(k) || shown(ai[k]);
+  // A reading that claims no tax at all is the one shape no arithmetic
+  // constrains: exentas absorbs the whole total and still adds up, so one
+  // printed number would vouch for a zero IVA on a taxed invoice. The page has
+  // to say the word — the model's counterpart to the parser's exempt-only rule.
+  const untaxed = (ai.iva5 ?? 0) === 0 && (ai.iva10 ?? 0) === 0 && (ai.total ?? 0) > 0;
+  const exemptShown = !untaxed || /exent/.test(words(text));
   const seen =
     !computed &&
     shown(ai.total) &&
@@ -271,21 +315,29 @@ export function witnessed(
     gravada('gravada10') &&
     shown(ai.iva5) &&
     shown(ai.iva10) &&
+    exemptShown &&
     rateShown();
 
   const r: ParsedReceipt = { ...ai };
   if (r.cdc && !digitsSeen(text, r.cdc)) r.cdc = null;
   if (!r.cdc) {
-    // The user is the buyer. A reading that names their own RUC as the issuer
-    // has the parties the wrong way round — turn it back if it says who the
-    // seller is, and otherwise leave the issuer unread rather than file a
-    // purchase as a sale, which moves its IVA from credit to debit.
-    if (ownRuc && r.emisorRuc === ownRuc) {
-      const seller = r.receptorRuc && r.receptorRuc !== ownRuc ? r.receptorRuc : null;
+    // The user is the buyer, and so is whoever the parser read in the receptor
+    // block. A reading that names either of them as the issuer has the parties
+    // the wrong way round — turn it back if it says who the seller is, and
+    // otherwise leave the issuer unread rather than file a purchase as a sale,
+    // which moves its IVA from credit to debit.
+    const buyers = [ownRuc, ocr?.receptorRuc].filter(Boolean);
+    if (r.emisorRuc && buyers.includes(r.emisorRuc)) {
+      const seller = r.receptorRuc && !buyers.includes(r.receptorRuc) ? r.receptorRuc : null;
       [r.emisorNombre, r.receptorNombre] = [r.receptorNombre, r.emisorNombre];
       r.receptorRuc = r.emisorRuc;
       r.emisorRuc = seller;
       r.emisorDv = seller ? calcRucDv(seller) : null;
+    } else if (r.emisorRuc && !ownRuc && ocr && ocr.emisorRuc == null && ocr.receptorRuc == null) {
+      // Both parties' RUCs are printed on every invoice, so with nothing
+      // saying which is which, the model's word alone does not decide it.
+      r.emisorRuc = null;
+      r.emisorDv = null;
     }
     if (r.emisorRuc && !digitsSeen(text, r.emisorRuc)) {
       r.emisorRuc = null;
@@ -347,9 +399,19 @@ function identified(
   const other = from === first ? second : first;
   const emisorRuc = from.emisorRuc;
   const sameIssuer = emisorRuc != null && other?.emisorRuc === emisorRuc;
+  // What the other reading calls the RUC being filed. It has no opinion only
+  // when it never placed that RUC at all: a reading that puts it on its own
+  // receptor side has the parties the other way round, and the name that goes
+  // with this RUC is that reading's receptorNombre — never its issuer's, which
+  // is then the buyer's.
+  const otherName = (): string | null => {
+    if (!other || emisorRuc == null) return other?.emisorNombre ?? null;
+    if (other.receptorRuc === emisorRuc) return other.receptorNombre ?? null;
+    return other.emisorRuc == null ? (other.emisorNombre ?? null) : null;
+  };
   const emisorNombre = sameIssuer
     ? issuerName(ocr?.emisorNombre ?? null, ai?.emisorNombre ?? null)
-    : (from.emisorNombre ?? (other?.emisorRuc == null ? (other?.emisorNombre ?? null) : null));
+    : (from.emisorNombre ?? otherName());
 
   const buyer = [first.receptorRuc, second?.receptorRuc].find((r) => r && r !== emisorRuc) ?? null;
 
@@ -397,17 +459,20 @@ export function decidePhoto(
   text: string,
   ownRuc: string | null = null,
 ): PhotoDecision {
-  const ai = aiRead ? witnessed(aiRead, text, ownRuc) : null;
+  const ai = aiRead ? witnessed(aiRead, text, ownRuc, ocr) : null;
   const veto = vetoed(ocr, ai?.reading ?? null);
   if (veto) return veto;
 
   const ocrSound = ocr != null && refusalOf(ocr) == null;
   const aiSound = ai != null && refusalOf(ai.reading) == null;
 
+  // Both readers named amounts and they differ: one is wrong and nothing says
+  // which, whether or not the model's date, RUC or name survived witnessing.
+  // An identifier the text did not show says nothing about the figures.
+  if (ocrSound && ai != null && amountsSound(ai.reading) && !sameAmounts(ocr, ai.reading)) {
+    return { kind: 'refuse', reason: 'lecturas', reading: ocr, detail: 'amounts' };
+  }
   if (ocrSound && aiSound) {
-    if (!sameAmounts(ocr, ai.reading)) {
-      return { kind: 'refuse', reason: 'lecturas', reading: ocr, detail: 'amounts' };
-    }
     return { kind: 'store', reading: identified(ocr, ocr, ai.reading), source: 'ocr+ai' };
   }
   if (ocrSound) {

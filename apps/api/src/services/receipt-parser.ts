@@ -349,7 +349,9 @@ function readFiscal(lines: string[], total: number | null): Fiscal {
       (out.derived ??= []).push(`iva${rate}`);
     } else if (g == null && i != null) {
       out[`gravada${rate}`] = Math.round(i * d);
-      (out.derived ??= []).push(`gravada${rate}`);
+      // Nothing taxed at this rate is exact; only a real IVA carries the
+      // rounding that earns slack (as detachedIva guards too).
+      if (i !== 0) (out.derived ??= []).push(`gravada${rate}`);
     }
   }
 
@@ -705,7 +707,7 @@ function readForeignCurrency(lines: string[]): string | null {
 
 /** Labels whose date is not the date of the sale. */
 const NOT_DATE =
-  /vigencia|vencimiento|valido|vence|timbrado|pedido|nro|numero|n°|cdc|autorizac|orden|caducidad|inicio/;
+  /vigencia|vencimiento|valido|vence|timbrado|pedido|nro|numero|n°|cdc|autorizac|orden|caducidad|inicio|remis|remitid/;
 
 function plausible(d: Date): boolean {
   if (Number.isNaN(d.getTime())) return false;
@@ -724,8 +726,9 @@ function readDate(lines: string[]): Date | null {
   lines.forEach((line) => {
     const low = norm(line);
     if (NOT_DATE.test(low)) return;
-    // On a KuDE photo "Emisión" survives where "Fecha" is lost.
-    const labelled = /fecha|emisi/.test(low);
+    // On a KuDE photo "Emisión" survives where "Fecha" is lost — but not
+    // through the tail of "remisión", which is a different document's date.
+    const labelled = /(?:^|[^a-z])(?:fecha|emisi)/.test(low);
 
     for (const m of line.matchAll(NUMERIC)) {
       const day = Number(m[1]);
@@ -1313,7 +1316,8 @@ export function fromExtraction(x: Extraction): ParsedReceipt {
       (f.derived ??= []).push(`iva${rate}`);
     } else if (g == null && i != null) {
       f[`gravada${rate}`] = roundTo(i * DIVISOR[rate], unit);
-      (f.derived ??= []).push(`gravada${rate}`);
+      // A rate with no tax is exact, and earns no rounding slack.
+      if (i !== 0) (f.derived ??= []).push(`gravada${rate}`);
     }
   }
   const totalIva = amount(x.totalIva);
