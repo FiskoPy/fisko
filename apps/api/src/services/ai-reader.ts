@@ -84,7 +84,13 @@ const INSTRUCTIONS =
   "value that is not on the paper. Amounts are numbers in the invoice's own currency: Paraguayan " +
   "'1.538,00' is 1538.00 and '223.150' Gs is 223150. gravada5 / gravada10 are the taxed sales " +
   'amounts as printed per rate, IVA included (columns 5% / 10%, "Total gravadas", "Gravadas 10%"). ' +
-  'iva5 / iva10 are the printed IVA liquidation per rate; totalIva the printed IVA total. exentas ' +
+  'iva5 / iva10 are the printed IVA liquidation per rate — the small figures under "LIQUIDACION ' +
+  'DEL I.V.A." beside (5%) (10%) T.IVA, or on an "IVA 10%:" line; totalIva the printed IVA total. ' +
+  'On a pre-printed form the columns headed 5% / 10% beside the items hold the taxed AMOUNT of ' +
+  'each item, which is a gravada, not its tax. The tax of a rate is never equal to its gravada: ' +
+  'iva10 is about an eleventh of gravada10, iva5 about a twenty-first of gravada5. If only one ' +
+  'figure is printed for a rate, decide which it is by that ratio against the total, and leave ' +
+  'the other null rather than repeating it. exentas ' +
   'is the exempt amount. total is the amount to pay in the invoice currency. redondeo is a printed ' +
   'Ley 347 rounding. moneda: PYG unless the invoice states another currency (e.g. "dolares ' +
   'americanos", "Moneda: USD"). tipoCambio: the printed exchange rate ("Cotizacion", "Tipo de ' +

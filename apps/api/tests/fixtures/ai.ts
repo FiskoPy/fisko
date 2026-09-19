@@ -10,7 +10,15 @@ import type { Extraction } from '../../src/services/receipt-parser';
  *
  * Masked as the Vision fixtures are: the buyer's name (X) and CI (1111111),
  * and a CDC's security code (check digit recomputed; the USD one matches
- * vision/rrtop-usd-kude). The model's mistakes are kept — they are the point:
+ * vision/rrtop-usd-kude).
+ *
+ * These are answers to the instructions as they stood that day. The baratao
+ * one is why they were tightened afterwards (ai-reader: the columns headed
+ * 5% / 10% beside the items are gravadas, not the tax) — asked again since,
+ * the model reads that talonario right. They are kept as they were: a reading
+ * that is wrong in a way that adds up is exactly what the checks are for.
+ *
+ * The model's mistakes are kept — they are the point:
  *  - usd-rrtop: issuer and buyer swapped (the CDC says who issued it);
  *  - baratao: the IVA written into gravada10;
  *  - ecop-exenta: a RUC with a wrong check digit, and a 40-digit CDC;

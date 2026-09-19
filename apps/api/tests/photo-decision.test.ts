@@ -373,6 +373,33 @@ describe('reading the text for what it shows', () => {
     expect(cents.has(Math.round(1_537 * 100))).toBe(false);
   });
 
+  it('takes the emission label the rebuilt rows left on the line above', () => {
+    // A KuDE prints "Emisión." and its date on separate rows (fox-kude), and
+    // requiring the label on the date's own line lost the model's reading.
+    const kude = photo('fox-kude');
+    expect(dateSeen(kude.text, new Date(Date.UTC(2026, 8, 1)))).toBe(true);
+    // …but the due date of the dollar KuDE is still not the emission date,
+    // nor is a lot's manufacturing date or a timbrado's validity.
+    const usd = photo('rrtop-usd-kude');
+    expect(dateSeen(usd.text, new Date(Date.UTC(2026, 7, 18)))).toBe(true); // emission
+    expect(dateSeen(usd.text, new Date(Date.UTC(2026, 8, 18)))).toBe(false); // vencimiento
+    expect(dateSeen(usd.text, new Date(Date.UTC(2026, 3, 30)))).toBe(false); // lote, FAB.
+    const minas = photo('minas281-ticket');
+    expect(dateSeen(minas.text, new Date(Date.UTC(2026, 8, 2)))).toBe(true); // emission
+    expect(dateSeen(minas.text, new Date(Date.UTC(2025, 10, 28)))).toBe(false); // vigencia
+    expect(dateSeen(minas.text, new Date(Date.UTC(2026, 10, 30)))).toBe(false); // válido hasta
+  });
+
+  it('takes a talonario date written out with no label at all', () => {
+    // "16 DE SEPTIEMBRE DE 2026", on a form whose other dates are the
+    // timbrado's vigencia — which the page names, so they are not rivals for
+    // it. Requiring the only date on the page cost this one.
+    const talonario = photo('baratao-talonario');
+    expect(dateSeen(talonario.text, new Date(Date.UTC(2026, 8, 16)))).toBe(true);
+    expect(dateSeen(talonario.text, new Date(Date.UTC(2026, 2, 31)))).toBe(false); // vigencia
+    expect(dateSeen(talonario.text, new Date(Date.UTC(2027, 2, 31)))).toBe(false); // fin de vigencia
+  });
+
   it('reads a date however it is printed', () => {
     const d = new Date(Date.UTC(2026, 7, 18));
     for (const text of ['18/08/2026', '18-8-26', '2026-08-18', '18 de agosto de 2026', 'emitida el 18.08.2026']) {

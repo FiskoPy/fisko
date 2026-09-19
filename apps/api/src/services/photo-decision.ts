@@ -185,14 +185,30 @@ export function dateSeen(text: string, date: Date): boolean {
   ].map((p) => new RegExp(p));
 
   const lines = text.toLowerCase().split(/\r?\n/);
-  const on = lines.filter((line) => patterns.some((p) => p.test(line)));
-  if (!on.length) return false;
-  if (on.some((line) => EMISSION.test(line) && !RIVAL.test(line))) return true;
+  const at: number[] = [];
+  lines.forEach((line, i) => {
+    if (patterns.some((p) => p.test(line))) at.push(i);
+  });
+  // Lines that call this date something else are out from the start.
+  const own = at.filter((i) => !RIVAL.test(lines[i] as string));
+  if (!own.length) return false;
 
-  // Unlabelled, as a till ticket prints it: only when nothing else on the
-  // paper could be taken for the date instead.
-  const printed = new Set((text.match(ANY_DATE) ?? []).map((t) => t.replace(/\s/g, '')));
-  return printed.size <= 1 && on.some((line) => !RIVAL.test(line));
+  // Printed under a label that calls it the emission date…
+  if (own.some((i) => EMISSION.test(lines[i] as string))) return true;
+  // …or under one that the rebuilt rows left on the line above or below it,
+  // as a KuDE's "Emisión." and its date end up ("01/09/2026 17:48").
+  const near = (i: number) => [lines[i - 1] ?? '', lines[i] ?? '', lines[i + 1] ?? ''].join(' | ');
+  if (own.some((i) => EMISSION.test(near(i)) && !RIVAL.test(near(i)))) return true;
+
+  // …or unlabelled, as a talonario prints it ("16 DE SEPTIEMBRE DE 2026"):
+  // only when no other date could be taken for it instead. A date the page
+  // itself calls something else — a vigencia, a vencimiento, a lot's — is not
+  // one of those.
+  const others = lines
+    .filter((line) => !RIVAL.test(line))
+    .flatMap((line) => [...line.matchAll(ANY_DATE)].map((m) => m[0]))
+    .filter((printed) => !patterns.some((p) => p.test(printed)));
+  return others.length === 0;
 }
 
 /** The digits of a document number's last group: "001-001-0000637" → "0000637". */
