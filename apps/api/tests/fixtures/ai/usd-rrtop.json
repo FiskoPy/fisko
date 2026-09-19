@@ -1,0 +1,46 @@
+{
+ "emisorNombre": "TEC BIO E.A.S",
+ "emisorRuc": "80175384",
+ "emisorDv": 8,
+ "receptorNombre": "RR TOP AGRO E.A.S.",
+ "receptorRuc": "80156877",
+ "timbrado": null,
+ "numeroDoc": "001-001-0000637",
+ "fecha": "2026-08-18",
+ "tipoDocumento": "factura",
+ "moneda": "USD",
+ "tipoCambio": 6027.92,
+ "totalEnGuaranies": 9270941,
+ "total": 1538,
+ "gravada5": 0,
+ "gravada10": null,
+ "exentas": 0,
+ "iva5": 0,
+ "iva10": 139.82,
+ "totalIva": 139.82,
+ "redondeo": null,
+ "cdc": "01801568773001001000063722026081811111111113",
+ "items": [
+  {
+   "descripcion": "ACRUX (GLIFOSATO SAL AMONIO 75.7%) KG LOTE ES260310 FAB 30/04/2026 V. 28/04/2032",
+   "cantidad": 120,
+   "precioUnitario": 4.9,
+   "total": 588,
+   "tasaIva": 10
+  },
+  {
+   "descripcion": "TACTIC 24% (CLETODIM) LT LOTE 1373/24 FAB 12/05/2025 V. 12/05/2027",
+   "cantidad": 100,
+   "precioUnitario": 6.5,
+   "total": 650,
+   "tasaIva": 10
+  },
+  {
+   "descripcion": "DIADEM (2,4-D SAL DIMETILAMINA (EQUIVALE LT LOTE ES260307 FAB 20/02/2026 V. 20/02/2029",
+   "cantidad": 100,
+   "precioUnitario": 3,
+   "total": 300,
+   "tasaIva": 10
+  }
+ ]
+}

@@ -3,9 +3,12 @@ import { prisma } from '../../lib/prisma';
 import { logger } from '../../lib/logger';
 import { AppError } from '../../errors/app-error';
 import { parseDte, isValidCdcCheckDigit } from '../../services/sifen';
+import { readInvoiceWithAI } from '../../services/ai-reader';
 import { extractText, MAX_IMAGE_BYTES } from '../../services/ocr';
+import { decidePhoto, type PhotoDecision } from '../../services/photo-decision';
 import {
   docDigits,
+  fromExtraction,
   layoutSkeleton,
   parseBest,
   receiptKey,
@@ -349,112 +352,30 @@ export async function importPhoto(userId: string, imageBase64: string) {
     );
   }
 
-  // Several readings of the same words — the printed rows rebuilt from where
-  // each word sits, and Vision's own block order — and keep the one whose
-  // numbers add up: a wrong layout pairs labels with the wrong amounts (see
-  // layoutsOf and parseBest). Vision's text is never empty here.
-  const ocr = await extractText(imageBase64);
-  const { parsed, text, layout } = (parseBest(ocr.layouts) ??
+  // Two independent readers on the same photo. The OCR text is read several
+  // ways — the printed rows rebuilt from where each word sits, and Vision's
+  // own block order — keeping the reading whose numbers add up; a vision
+  // model reads the image as a whole. decidePhoto weighs the two, with the
+  // OCR text as the witness to what the model says is printed. The model
+  // never runs alone: without Vision's text there is nothing to hold it to.
+  const [ocr, ai, owner] = await Promise.all([
+    extractText(imageBase64),
+    readInvoiceWithAI(imageBase64),
+    prisma.user.findUnique({ where: { id: userId }, select: { ruc: true } }),
+  ]);
+  const { parsed: ocrParsed, text, layout } = (parseBest(ocr.layouts) ??
     parseBest([{ layout: 'blocks', text: ocr.text }])) as Reading;
-
-  if (parsed.nota) {
-    throw AppError.badRequest(
-      `Las notas de ${parsed.nota === 'credito' ? 'crédito' : 'débito'} todavía no se cargan por foto. ` +
-        'Importá su XML.',
-    );
-  }
-
-  if (parsed.foreignCurrency) {
-    // A dollar invoice adds up in dollars, so the checks below would pass it,
-    // and it was stored as guaraníes (2026-09-19). Its XML carries the
-    // currency and the exchange rate; a photo cannot.
-    throw AppError.badRequest(
-      `Esta factura está en ${parsed.foreignCurrency === 'USD' ? 'dólares' : 'moneda extranjera'}, ` +
-        'y la foto sólo lee guaraníes. Cargala con su XML, o dejá que llegue por correo: ' +
-        'así se registra con su tipo de cambio.',
-    );
-  }
-
-  if (parsed.total == null) {
-    // Three real photos failed here on 2026-09-13 and the only record was
-    // "400", so the layout that defeated the parser was unrecoverable. Log the
-    // layout, then — but ONLY the layout: a receipt's text carries the buyer's
-    // name and CI/RUC, and Render keeps these logs outside our control. The
-    // skeleton keeps fiscal labels and number shapes and masks everything
-    // else, and no user id rides on the same line.
-    logger.warn(
-      {
-        lines: text.split(/\r?\n/).length,
-        reading: layout,
-        missing: parsed.missing,
-        layout: layoutSkeleton(text),
-      },
-      'import-photo: no total found in OCR text',
-    );
-    throw AppError.badRequest(
-      'No pudimos leer el total de la factura. Sacá una foto por factura, de ' +
-        'cerca, con buena luz y la factura plana sobre una superficie oscura.',
-    );
-  }
-
-  if (parsed.totalsAgree === false) {
-    // The amounts contradict each other — the total against gravadas plus
-    // exentas, or an IVA against its own gravada — so one of them is misread
-    // and nothing says which. Storing it put a Gs 223.150 ticket on record as
-    // Gs 29 (2026-09-15). Same logging rule as above.
-    logger.warn(
-      {
-        lines: text.split(/\r?\n/).length,
-        reading: layout,
-        missing: parsed.missing,
-        layout: layoutSkeleton(text),
-      },
-      'import-photo: amounts contradict each other',
-    );
-    throw AppError.badRequest(
-      'Los montos de la factura no cuadran entre sí, así que no la guardamos. ' +
-        'Sacá la foto de nuevo: una sola factura por foto, bien derecha, con ' +
-        'buena luz y el papel plano.',
-    );
-  }
-
-  if (parsed.missing.includes('IVA')) {
-    // No IVA read at all — and the IVA is what this record is for. Stored
-    // anyway, a photo showed "Gs 0" on every tax line (a diesel ticket,
-    // 2026-09-14) and read as a purchase without IVA. An exempt-only invoice
-    // is not refused: the parser does not report its IVA as missing.
-    logger.warn(
-      {
-        lines: text.split(/\r?\n/).length,
-        reading: layout,
-        missing: parsed.missing,
-        layout: layoutSkeleton(text),
-      },
-      'import-photo: no IVA found in OCR text',
-    );
-    throw AppError.badRequest(
-      'No pudimos leer el IVA de la factura. Sacá la foto de nuevo, que se vea ' +
-        'bien el pie con la liquidación del IVA.',
-    );
-  }
-
-  if (parsed.fechaEmision == null) {
-    // Stored anyway, it took the day of the upload and landed in the wrong
-    // month's IVA. Same logging rule as above.
-    logger.warn(
-      {
-        lines: text.split(/\r?\n/).length,
-        reading: layout,
-        missing: parsed.missing,
-        layout: layoutSkeleton(text),
-      },
-      'import-photo: no date found in OCR text',
-    );
-    throw AppError.badRequest(
-      'No pudimos leer la fecha de la factura. Sacá la foto de nuevo, que se vea ' +
-        'bien la fecha de emisión.',
-    );
-  }
+  const decision = decidePhoto(
+    ocrParsed,
+    ai ? fromExtraction(ai) : null,
+    ocr.text,
+    owner?.ruc?.replace(/\D/g, '') || null,
+  );
+  if (decision.kind === 'refuse') refusePhoto(decision, text, layout);
+  const parsed = decision.reading;
+  // decidePhoto stores only a reading with its total and date (see refusalOf).
+  const { total, fechaEmision } = parsed;
+  if (total == null || fechaEmision == null) throw new Error('import-photo: a stored reading lacks total or date');
 
   if (parsed.missing.length) {
     // An import that goes through with fields missing was silent on the
@@ -482,8 +403,10 @@ export async function importPhoto(userId: string, imageBase64: string) {
     );
   }
 
-  const iva10 = parsed.iva10 ?? 0;
-  const iva5 = parsed.iva5 ?? 0;
+  // Guaraníes are whole; another currency keeps its cents.
+  const round = (v: number) => (parsed.foreignCurrency ? Math.round(v * 100) / 100 : Math.round(v));
+  const iva10 = round(parsed.iva10 ?? 0);
+  const iva5 = round(parsed.iva5 ?? 0);
 
   const invoice = await prisma.invoice.create({
     data: {
@@ -496,12 +419,13 @@ export async function importPhoto(userId: string, imageBase64: string) {
       emisorNombre: parsed.emisorNombre ?? 'Sin identificar',
       receptorRuc: parsed.receptorRuc,
       receptorNombre: parsed.receptorNombre,
-      fechaEmision: parsed.fechaEmision,
-      moneda: 'PYG',
+      fechaEmision,
+      moneda: parsed.foreignCurrency ?? 'PYG',
+      tipoCambio: parsed.tipoCambio,
       timbrado: parsed.timbrado,
       numeroDoc: parsed.numeroDoc,
-      totalOpe: parsed.total,
-      totalIva: iva10 + iva5,
+      totalOpe: total,
+      totalIva: round(iva10 + iva5),
       iva5,
       iva10,
       // baseGrav is the NET taxable base — the same thing SIFEN calls
@@ -512,16 +436,132 @@ export async function importPhoto(userId: string, imageBase64: string) {
       // from the tax only when we did not. iva*10 and iva*20 are the correct
       // multipliers for the NET base (49.600*10 = 496.000 = 545.600 - 49.600).
       baseGrav5:
-        parsed.gravada5 != null ? Math.max(0, Math.round(parsed.gravada5 - iva5)) : iva5 * 20,
+        parsed.gravada5 != null ? Math.max(0, round(parsed.gravada5 - iva5)) : round(iva5 * 20),
       baseGrav10:
-        parsed.gravada10 != null ? Math.max(0, Math.round(parsed.gravada10 - iva10)) : iva10 * 10,
+        parsed.gravada10 != null ? Math.max(0, round(parsed.gravada10 - iva10)) : round(iva10 * 10),
+      // Line items, when the vision model listed them and they add up to the
+      // amounts stored (see itemsFitting).
+      items: {
+        create: parsed.items.map((it) => {
+          const d = it.ivaRate === 10 ? 11 : it.ivaRate === 5 ? 21 : 0;
+          const ivaMonto = d ? round(it.total / d) : 0;
+          return {
+            codigo: null,
+            descripcion: it.descripcion,
+            cantidad: it.cantidad,
+            precioUnit: it.precioUnit,
+            total: it.total,
+            ivaRate: it.ivaRate,
+            ivaBase: round(it.total - ivaMonto),
+            ivaMonto,
+          };
+        }),
+      },
       source: 'ocr',
     },
     include: { items: true },
   });
+  logger.info(
+    { reading: layout, readers: decision.source, items: parsed.items.length },
+    'import-photo: stored',
+  );
 
   // The raw Prisma row serialises Decimal columns as strings, which the app's
   // parser rejects — after the invoice was already stored. Same shape as
   // import-xml, so the client has one Invoice to understand.
   return { invoice: toPublicInvoice(invoice), missing: parsed.missing, confidence: parsed.confidence };
+}
+
+/**
+ * Refuses a photo, with the message for its reason.
+ *
+ * Three real photos were refused on 2026-09-13 and the only record was
+ * "400", so the layout that defeated the parser was unrecoverable. Each
+ * refusal logs the layout, then — but ONLY the layout: a receipt's text
+ * carries the buyer's name and CI/RUC, and Render keeps these logs outside
+ * our control. The skeleton keeps fiscal labels and number shapes and masks
+ * everything else, and no user id rides on the same line.
+ */
+function refusePhoto(
+  decision: Extract<PhotoDecision, { kind: 'refuse' }>,
+  text: string,
+  layout: string,
+): never {
+  const parsed = decision.reading;
+  const context = {
+    lines: text.split(/\r?\n/).length,
+    reading: layout,
+    missing: parsed?.missing ?? [],
+    ...(decision.detail ? { detail: decision.detail } : {}),
+    layout: layoutSkeleton(text),
+  };
+
+  switch (decision.reason) {
+    case 'nota':
+      throw AppError.badRequest(
+        `Las notas de ${parsed?.nota === 'debito' ? 'débito' : 'crédito'} todavía no se cargan por foto. ` +
+          'Importá su XML.',
+      );
+
+    case 'moneda':
+      // A dollar invoice adds up in dollars, so every check on the amounts
+      // passed it, and it was stored as guaraníes (2026-09-19). It is stored
+      // in its currency only when the model read the exchange rate, the
+      // printed guaraní total confirmed it and Vision saw both; otherwise its
+      // XML carries them.
+      logger.warn(context, 'import-photo: foreign currency');
+      throw AppError.badRequest(
+        `Esta factura está en ${parsed?.foreignCurrency === 'USD' ? 'dólares' : 'moneda extranjera'}, ` +
+          'y no pudimos leer su tipo de cambio en la foto. Cargala con su XML, o dejá que llegue por ' +
+          'correo: así se registra con su tipo de cambio.',
+      );
+
+    case 'total':
+      logger.warn(context, 'import-photo: no total found in OCR text');
+      throw AppError.badRequest(
+        'No pudimos leer el total de la factura. Sacá una foto por factura, de ' +
+          'cerca, con buena luz y la factura plana sobre una superficie oscura.',
+      );
+
+    case 'contradiccion':
+      // The amounts contradict each other — the total against gravadas plus
+      // exentas, or an IVA against its own gravada — so one of them is
+      // misread and nothing says which. Storing it put a Gs 223.150 ticket on
+      // record as Gs 29 (2026-09-15).
+      logger.warn(context, 'import-photo: amounts contradict each other');
+      throw AppError.badRequest(
+        'Los montos de la factura no cuadran entre sí, así que no la guardamos. ' +
+          'Sacá la foto de nuevo: una sola factura por foto, bien derecha, con ' +
+          'buena luz y el papel plano.',
+      );
+
+    case 'iva':
+      // No IVA read at all — and the IVA is what this record is for. Stored
+      // anyway, a photo showed "Gs 0" on every tax line (a diesel ticket,
+      // 2026-09-14) and read as a purchase without IVA. An exempt-only
+      // invoice is not refused: the parser does not report its IVA missing.
+      logger.warn(context, 'import-photo: no IVA found in OCR text');
+      throw AppError.badRequest(
+        'No pudimos leer el IVA de la factura. Sacá la foto de nuevo, que se vea ' +
+          'bien el pie con la liquidación del IVA.',
+      );
+
+    case 'fecha':
+      // Stored anyway, it took the day of the upload and landed in the wrong
+      // month's IVA.
+      logger.warn(context, 'import-photo: no date found in OCR text');
+      throw AppError.badRequest(
+        'No pudimos leer la fecha de la factura. Sacá la foto de nuevo, que se vea ' +
+          'bien la fecha de emisión.',
+      );
+
+    case 'lecturas':
+      // Two readings that each hold up, with different amounts or dates: one
+      // of them is wrong and nothing says which.
+      logger.warn(context, 'import-photo: the two readings disagree');
+      throw AppError.badRequest(
+        'Leímos la factura de dos maneras y no coinciden, así que no la guardamos. ' +
+          'Sacá otra foto, bien derecha, con buena luz y el papel plano.',
+      );
+  }
 }

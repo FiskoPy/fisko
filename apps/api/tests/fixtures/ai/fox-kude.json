@@ -1,0 +1,60 @@
+{
+ "emisorNombre": "FOX REGALOS & DECOR E.A.S-FOX REGALOS & DECOR E.A.S",
+ "emisorRuc": "80126582",
+ "emisorDv": 7,
+ "receptorNombre": "XXXXXXXXX XXXXXXX XXXXXXX",
+ "receptorRuc": "1111111",
+ "timbrado": "18065898",
+ "numeroDoc": "001-001-0016175",
+ "fecha": "2026-09-01",
+ "tipoDocumento": "factura",
+ "moneda": "PYG",
+ "tipoCambio": null,
+ "totalEnGuaranies": null,
+ "total": 48000,
+ "gravada5": 0,
+ "gravada10": 48000,
+ "exentas": null,
+ "iva5": 0,
+ "iva10": 4364,
+ "totalIva": 4364,
+ "redondeo": null,
+ "cdc": "01801265827001001001617522026090113141592659",
+ "items": [
+  {
+   "descripcion": "44822 MARCADOR",
+   "cantidad": 1,
+   "precioUnitario": 5000,
+   "total": 5000,
+   "tasaIva": 10
+  },
+  {
+   "descripcion": "25364 MARCADOR",
+   "cantidad": 1,
+   "precioUnitario": 10500,
+   "total": 10500,
+   "tasaIva": 10
+  },
+  {
+   "descripcion": "14823 MARCADOR",
+   "cantidad": 1,
+   "precioUnitario": 4500,
+   "total": 4500,
+   "tasaIva": 10
+  },
+  {
+   "descripcion": "36908 SILICONA LN BARRA",
+   "cantidad": 10,
+   "precioUnitario": 2000,
+   "total": 20000,
+   "tasaIva": 10
+  },
+  {
+   "descripcion": "42530 CARTULINA CARTON",
+   "cantidad": 1,
+   "precioUnitario": 8000,
+   "total": 8000,
+   "tasaIva": 10
+  }
+ ]
+}

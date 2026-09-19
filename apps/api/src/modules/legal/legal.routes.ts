@@ -22,7 +22,7 @@ const RUC = process.env.LEGAL_RUC ?? '80175384-8';
 // actually receives mail, so a stale default here is a submission failure.
 const CONTACTO = process.env.LEGAL_CONTACT_EMAIL ?? 'fiskoapp@gmail.com';
 
-const ACTUALIZADO = '14 de septiembre de 2026';
+const ACTUALIZADO = '19 de septiembre de 2026';
 
 const page = (titulo: string, cuerpo: string): string => `<!doctype html>
 <html lang="es">
@@ -84,9 +84,12 @@ de datos personales.</p>
       identificador de cuenta de Google. No accedemos a tus contactos ni a tu Drive.</li>
   <li><strong>Facturas electrónicas (DTE)</strong> que importás: CDC, RUC y nombre del emisor y del
       receptor, fecha, moneda, montos, IVA discriminado (5% y 10%) y el detalle de los ítems.</li>
-  <li><strong>Fotos de facturas de papel</strong>, si usás la cámara: la imagen se envía a
-      <strong>Google Cloud Vision</strong> únicamente para leer el texto, no se guarda en nuestros
-      servidores ni en Google, y de ella conservamos sólo los datos fiscales extraídos.</li>
+  <li><strong>Fotos de facturas</strong>, si usás la cámara: la imagen se envía a
+      <strong>Google Cloud Vision</strong> y a <strong>OpenAI</strong> únicamente para leerla (los
+      datos de la factura, incluidos el emisor, el receptor y los ítems). No la guardamos en
+      nuestros servidores: conservamos sólo los datos extraídos. Según las condiciones de sus API,
+      ninguno de los dos usa esas imágenes para entrenar sus modelos; OpenAI puede conservarlas
+      hasta 30 días para control de abusos y después las elimina.</li>
   <li><strong>Datos de pago:</strong> las suscripciones se cobran a través de <strong>Pagopar</strong>.
       El número de tu tarjeta y demás datos de pago los ingresás en la página de Pagopar y
       <strong>nunca pasan por Fisko</strong>; nosotros recibimos únicamente la confirmación del
@@ -119,7 +122,7 @@ comerciales.</p>
 aplicación se sirve desde <strong>Render</strong>, ambos con servidores en los Estados Unidos; los
 correos de recuperación se envían mediante <strong>Brevo</strong>. Para
 funciones puntuales intervienen además <strong>Google Cloud Vision</strong> (lectura de fotos),
-<strong>OpenAI</strong> (redacción de la proyección de IVA, sólo con montos agregados) y
+<strong>OpenAI</strong> (lectura de fotos de facturas y redacción de la proyección de IVA) y
 <strong>Pagopar</strong> (cobro de suscripciones, en Paraguay). Esto implica una transferencia
 internacional de datos, necesaria para prestar el servicio. Todos actúan únicamente como encargados
 del tratamiento por nuestra cuenta y no usan tus datos para fines propios.</p>

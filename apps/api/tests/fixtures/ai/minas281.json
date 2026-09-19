@@ -1,0 +1,60 @@
+{
+ "emisorNombre": "GASPAR RODRIGUEZ DE FRANCIA RUTA 6 SANTA RITA - Alto Paraná - Paraguay",
+ "emisorRuc": "5482866",
+ "emisorDv": 0,
+ "receptorNombre": "XXXXXXXXX XXXXXXX, XXXXXXX X",
+ "receptorRuc": "1111111",
+ "timbrado": "18479784",
+ "numeroDoc": "001-003-0003166",
+ "fecha": "2026-09-02",
+ "tipoDocumento": "factura",
+ "moneda": "PYG",
+ "tipoCambio": null,
+ "totalEnGuaranies": null,
+ "total": 91925,
+ "gravada5": 44425,
+ "gravada10": 47500,
+ "exentas": 0,
+ "iva5": 2115,
+ "iva10": 4318,
+ "totalIva": 6433,
+ "redondeo": 0,
+ "cdc": null,
+ "items": [
+  {
+   "descripcion": "ALHO PICADO 200GR",
+   "cantidad": 1,
+   "precioUnitario": 15000,
+   "total": 15000,
+   "tasaIva": 10
+  },
+  {
+   "descripcion": "BIS BLANCO 100.8GR",
+   "cantidad": 1,
+   "precioUnitario": 12500,
+   "total": 12500,
+   "tasaIva": 10
+  },
+  {
+   "descripcion": "FYV CEBOLLA KG",
+   "cantidad": 2.154,
+   "precioUnitario": 9300,
+   "total": 21325,
+   "tasaIva": 5
+  },
+  {
+   "descripcion": "FYV BANANA KARAPE KG",
+   "cantidad": 1.848,
+   "precioUnitario": 12500,
+   "total": 23100,
+   "tasaIva": 5
+  },
+  {
+   "descripcion": "PICADITOS DE VERDURAS",
+   "cantidad": 2,
+   "precioUnitario": 10000,
+   "total": 20000,
+   "tasaIva": 10
+  }
+ ]
+}

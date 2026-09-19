@@ -1,0 +1,137 @@
+{
+ "emisorNombre": "SUPER PRIMAVERA S.A.",
+ "emisorRuc": "80036323",
+ "emisorDv": 0,
+ "receptorNombre": "XXXXXXX XXXXXXXXX",
+ "receptorRuc": "1111111",
+ "timbrado": null,
+ "numeroDoc": null,
+ "fecha": "2026-09-01",
+ "tipoDocumento": "factura",
+ "moneda": "PYG",
+ "tipoCambio": null,
+ "totalEnGuaranies": null,
+ "total": 223150,
+ "gravada5": 76590,
+ "gravada10": 146589,
+ "exentas": 0,
+ "iva5": 3647,
+ "iva10": 13326,
+ "totalIva": 16973,
+ "redondeo": null,
+ "cdc": null,
+ "items": [
+  {
+   "descripcion": "ROSCA CON QU",
+   "cantidad": 0.12,
+   "precioUnitario": 69990,
+   "total": 8119,
+   "tasaIva": 10
+  },
+  {
+   "descripcion": "SCHWEPPES CI",
+   "cantidad": 1,
+   "precioUnitario": 6990,
+   "total": 6990,
+   "tasaIva": 10
+  },
+  {
+   "descripcion": "AGUA MINERAL",
+   "cantidad": 3,
+   "precioUnitario": 1600,
+   "total": 4800,
+   "tasaIva": 10
+  },
+  {
+   "descripcion": "TORTA NEGA M",
+   "cantidad": 0.24,
+   "precioUnitario": 45500,
+   "total": 11102,
+   "tasaIva": 10
+  },
+  {
+   "descripcion": "ROSCA CON QU",
+   "cantidad": 0.1,
+   "precioUnitario": 69990,
+   "total": null,
+   "tasaIva": 10
+  },
+  {
+   "descripcion": "ROSCA CON QU",
+   "cantidad": 0.11,
+   "precioUnitario": 69990,
+   "total": 7419,
+   "tasaIva": 10
+  },
+  {
+   "descripcion": "LECHE LACTOL",
+   "cantidad": 1,
+   "precioUnitario": 9800,
+   "total": 9800,
+   "tasaIva": 5
+  },
+  {
+   "descripcion": "LECHE LACTOL",
+   "cantidad": 3,
+   "precioUnitario": 9800,
+   "total": 29400,
+   "tasaIva": 5
+  },
+  {
+   "descripcion": "ACEITE GIRAS",
+   "cantidad": 1,
+   "precioUnitario": 29400,
+   "total": 29400,
+   "tasaIva": 5
+  },
+  {
+   "descripcion": "YPE JAB POLV",
+   "cantidad": 1,
+   "precioUnitario": 64400,
+   "total": 64400,
+   "tasaIva": 10
+  },
+  {
+   "descripcion": "ZAELI PIPOCA",
+   "cantidad": 1,
+   "precioUnitario": 7990,
+   "total": 7990,
+   "tasaIva": 5
+  },
+  {
+   "descripcion": "PAN DE MAIZ",
+   "cantidad": 1,
+   "precioUnitario": 23900,
+   "total": 23900,
+   "tasaIva": 10
+  },
+  {
+   "descripcion": "TOALLA DE PA",
+   "cantidad": 1,
+   "precioUnitario": 5200,
+   "total": 5200,
+   "tasaIva": 10
+  },
+  {
+   "descripcion": "BOLSA P/MIEL",
+   "cantidad": 1,
+   "precioUnitario": 4300,
+   "total": 4300,
+   "tasaIva": 10
+  },
+  {
+   "descripcion": "NORTE SUR BO",
+   "cantidad": 1,
+   "precioUnitario": 2800,
+   "total": 2800,
+   "tasaIva": 10
+  },
+  {
+   "descripcion": "NORTE SUR PR",
+   "cantidad": 2,
+   "precioUnitario": 350,
+   "total": 700,
+   "tasaIva": 10
+  }
+ ]
+}

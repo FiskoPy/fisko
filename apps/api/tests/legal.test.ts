@@ -54,6 +54,17 @@ describe('GET /eliminar-cuenta', () => {
 });
 
 describe('GET /privacidad names where the data actually lives', () => {
+  it('says a photo goes to both readers, and what they may do with it', async () => {
+    // A photo has been read by a vision model as well as by Vision since
+    // 2026-09-19 (see photo-decision); the page said Vision only.
+    const { text } = await request(app).get('/privacidad');
+    const photos = text.slice(text.indexOf('Fotos de facturas'), text.indexOf('</li>', text.indexOf('Fotos de facturas')));
+    expect(photos).toContain('Google Cloud Vision');
+    expect(photos).toContain('OpenAI');
+    expect(photos).toMatch(/ninguno\s+de\s+los\s+dos\s+usa esas im[áa]genes para entrenar/i);
+    expect(photos).toMatch(/30\s+d[íi]as/);
+  });
+
   it('names Supabase for storage since the move off Render Postgres', async () => {
     // The database moved to Supabase on 2026-09-11; the page kept saying
     // "gestionada por Render" until the store/Pagopar review pass caught it.

@@ -1,0 +1,32 @@
+{
+ "emisorNombre": "COOP. COLONIAS AGRICOLAS IND. LTDA.",
+ "emisorRuc": "8001798",
+ "emisorDv": 9,
+ "receptorNombre": "XXXXXXXXX XXXXXXX, XXXXXXX XXXXXX",
+ "receptorRuc": "1111111",
+ "timbrado": "16075369",
+ "numeroDoc": "005-005-0155739",
+ "fecha": "2026-09-16",
+ "tipoDocumento": "factura",
+ "moneda": "PYG",
+ "tipoCambio": null,
+ "totalEnGuaranies": null,
+ "total": 300000,
+ "gravada5": 0,
+ "gravada10": 0,
+ "exentas": 300000,
+ "iva5": 0,
+ "iva10": 0,
+ "totalIva": 0,
+ "redondeo": null,
+ "cdc": "0180017980050050155739220260916111111111",
+ "items": [
+  {
+   "descripcion": "Nafta Ecopower Especial 93",
+   "cantidad": 38.71,
+   "precioUnitario": 7750,
+   "total": 300000,
+   "tasaIva": 0
+  }
+ ]
+}

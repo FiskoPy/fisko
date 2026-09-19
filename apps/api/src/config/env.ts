@@ -33,6 +33,9 @@ const envSchema = z.object({
   // Marco 2 phase 2E. Optional: the fiscal rules run without it and the IVA
   // projection degrades to plain arithmetic when it is absent.
   OPENAI_API_KEY: z.string().optional(),
+  // Reading invoice photos with a vision model as well as the OCR parser (see
+  // ai-reader). On by default when OPENAI_API_KEY is set; "off" turns it off.
+  OCR_AI: z.enum(['on', 'off']).default('on'),
 
   // Marco 2 phase 2D. An API key rather than a service-account JSON: the
   // client org enforces iam.disableServiceAccountKeyCreation.

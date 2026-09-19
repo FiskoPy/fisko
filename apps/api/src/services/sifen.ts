@@ -168,7 +168,10 @@ export function parseDte(xml: string): ParsedDte {
 }
 
 function parseDate(v: unknown): Date {
-  const d = v ? new Date(String(v)) : new Date(NaN);
+  // Date parses "0" as the year 2000 and "1" as 2001: a malformed dFeEmiDE
+  // would be stored as 2000-01-01 instead of refusing the XML.
+  const text = typeof v === 'string' || typeof v === 'number' ? String(v).trim() : '';
+  const d = /^\d{4}-\d{2}-\d{2}/.test(text) ? new Date(text) : new Date(NaN);
   if (Number.isNaN(d.getTime())) throw AppError.badRequest('Fecha de emisión inválida en el DTE');
   return d;
 }

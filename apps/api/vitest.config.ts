@@ -16,6 +16,8 @@ export default defineConfig({
       JWT_ACCESS_TTL: '15m',
       JWT_REFRESH_TTL: '30d',
       EMAIL_CRYPTO_KEY: process.env.EMAIL_CRYPTO_KEY ?? 'test-email-crypto-key-0123456789',
+      // The model reader is a paid call: never from a test, even with a key in .env.
+      OCR_AI: 'off',
     },
     // Integration tests share a DB — run serially to avoid cross-test races.
     fileParallelism: false,

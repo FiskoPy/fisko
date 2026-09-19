@@ -101,6 +101,22 @@ describe('parseDte', () => {
     expect(() => parseDte('not xml at all <<<')).toThrow();
     expect(() => parseDte('<root><a>1</a></root>')).toThrow();
   });
+
+  it('rejects an emission date that is not a date', () => {
+    // Date reads "0" as the year 2000 and "1" as 2001, so a malformed
+    // dFeEmiDE was stored as 2000-01-01 — a whole year off, silently.
+    for (const bad of ['0', '00', '+0', '0.', '.0', '1', 'ayer', '']) {
+      const xml = DTE_XML.replace('2026-02-14T16:53:05', bad);
+      expect(`${bad || '(empty)'}: ${(() => {
+        try {
+          parseDte(xml);
+          return 'accepted';
+        } catch {
+          return 'refused';
+        }
+      })()}`).toBe(`${bad || '(empty)'}: refused`);
+    }
+  });
 });
 
 describe('CDC validation', () => {

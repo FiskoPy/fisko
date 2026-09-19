@@ -1,0 +1,405 @@
+import { describe, expect, it } from 'vitest';
+
+import {
+  dateSeen,
+  decidePhoto,
+  digitsSeen,
+  nameSeen,
+  printedAmounts,
+  witnessed,
+} from '../src/services/photo-decision';
+import {
+  fromExtraction,
+  parseReceipt,
+  parseBest,
+  type Extraction,
+  type ParsedReceipt,
+} from '../src/services/receipt-parser';
+import { layoutsOf } from '../src/services/vision-layout';
+import { aiFixture, type AiFixture } from './fixtures/ai';
+import { visionFixture, type VisionFixture } from './fixtures/vision';
+
+/**
+ * Two readers, one photo. The parser reads Vision's words by the rules; a
+ * vision model reads the image. This is what gets stored — and what does not.
+ *
+ * The photos are the client's own, with both readers' real output (see
+ * tests/fixtures/vision and tests/fixtures/ai).
+ */
+
+/** The parser's best reading of a photographed ticket, and Vision's text. */
+function photo(name: VisionFixture): { parsed: ParsedReceipt; text: string } {
+  const annotation = visionFixture(name);
+  const reading = parseBest(layoutsOf(annotation));
+  if (!reading) throw new Error(`no reading for ${name}`);
+  return { parsed: reading.parsed, text: annotation.text ?? '' };
+}
+
+const model = (name: AiFixture, overrides: Partial<Extraction> = {}) =>
+  fromExtraction({ ...aiFixture(name), ...overrides });
+
+/** The buyer, as every fixture masks them. */
+const BUYER = '1111111';
+
+describe('what the two readers agree on', () => {
+  it.each([
+    ['minas281-ticket', 'minas281', 91_925],
+    ['minas281-ticket-retake', 'minas281', 91_925],
+    ['fox-kude', 'fox-kude', 48_000],
+    ['primavera-ticket', 'primavera', 223_150],
+  ] as [VisionFixture, AiFixture, number][])('%s is stored by both', (v, a, total) => {
+    const { parsed, text } = photo(v);
+    const decision = decidePhoto(parsed, model(a), text, BUYER);
+    expect(decision).toMatchObject({ kind: 'store', source: 'ocr+ai' });
+    if (decision.kind !== 'store') return;
+    expect(decision.reading.total).toBe(total);
+    expect(decision.reading.iva10).toBe(parsed.iva10);
+    expect(decision.reading.missing).toEqual([]);
+  });
+
+  it("keeps the parser's issuer name where the model gave an address", () => {
+    const { parsed, text } = photo('minas281-ticket');
+    const decision = decidePhoto(parsed, model('minas281'), text, BUYER);
+    expect(decision.reading?.emisorNombre).toBe('MINAS281 MERCADO');
+    // …and takes the line items, which only the model reads.
+    expect(decision.reading?.items).toHaveLength(5);
+  });
+
+  it('keeps a name the model read without the phone number beside it', () => {
+    const { parsed, text } = photo('rrtop-usd-kude');
+    expect(parsed.emisorNombre).toBe('RR TOP AGRO E.A.S.');
+    const decision = decidePhoto(parsed, model('usd-rrtop'), text, '80175384');
+    expect(decision.reading?.emisorNombre).toBe('RR TOP AGRO E.A.S.');
+  });
+});
+
+describe('when only one reader holds up', () => {
+  it("the parser stores the talonario the model got wrong, and takes its number and item", () => {
+    const { parsed, text } = photo('baratao-talonario');
+    // The model put the IVA in the gravada, so its reading does not add up.
+    expect(model('baratao').totalsAgree).toBe(false);
+    const decision = decidePhoto(parsed, model('baratao'), text, BUYER);
+    expect(decision).toMatchObject({ kind: 'store', source: 'ocr' });
+    expect(decision.reading).toMatchObject({
+      total: 160_000,
+      iva10: 14_545,
+      numeroDoc: '001-001-0192529', // read by the model, printed in the text
+    });
+    expect(decision.reading?.items).toHaveLength(1);
+  });
+
+  it('the dollar invoice is stored in dollars, at the rate the model read', () => {
+    const { parsed, text } = photo('rrtop-usd-kude');
+    // Alone, the parser refuses it: dollars with no exchange rate.
+    expect(decidePhoto(parsed, null, text, '80175384')).toMatchObject({
+      kind: 'refuse',
+      reason: 'moneda',
+    });
+
+    const decision = decidePhoto(parsed, model('usd-rrtop'), text, '80175384');
+    expect(decision).toMatchObject({ kind: 'store', source: 'ai' });
+    expect(decision.reading).toMatchObject({
+      foreignCurrency: 'USD',
+      tipoCambio: 6_027.92,
+      total: 1_538,
+      iva10: 139.82,
+      emisorRuc: '80156877',
+      receptorRuc: '80175384',
+    });
+    expect(decision.reading?.items).toHaveLength(3);
+  });
+});
+
+describe('what one reader saw that the other cannot overrule', () => {
+  it('a dollar invoice the model read as guaraníes is refused, not stored as Gs 1.538', () => {
+    const { parsed, text } = photo('rrtop-usd-kude');
+    const asGuaranies = model('usd-rrtop', { moneda: 'PYG', tipoCambio: null, totalEnGuaranies: null });
+    expect(asGuaranies.total).toBe(1_538);
+    expect(asGuaranies.totalsAgree).toBe(true); // it adds up — in the wrong currency
+
+    const decision = decidePhoto(parsed, asGuaranies, text, '80175384');
+    expect(decision).toMatchObject({ kind: 'refuse', reason: 'moneda', detail: 'currencies' });
+  });
+
+  it('a guaraní ticket the model read as dollars is refused too', () => {
+    const { parsed, text } = photo('minas281-ticket');
+    const asDollars = model('minas281', {
+      moneda: 'USD',
+      tipoCambio: 7_000,
+      totalEnGuaranies: 91_925 * 7_000,
+    });
+    expect(asDollars.tipoCambio).toBe(7_000);
+    expect(decidePhoto(parsed, asDollars, text, BUYER)).toMatchObject({
+      kind: 'refuse',
+      reason: 'moneda',
+    });
+  });
+
+  it('a note either reader recognises is refused, whatever the other reads', () => {
+    const { parsed, text } = photo('minas281-ticket');
+    expect(decidePhoto(parsed, model('minas281', { tipoDocumento: 'nota_credito' }), text, BUYER)).toMatchObject({
+      kind: 'refuse',
+      reason: 'nota',
+    });
+    expect(decidePhoto({ ...parsed, nota: 'debito' }, model('minas281'), text, BUYER)).toMatchObject({
+      kind: 'refuse',
+      reason: 'nota',
+    });
+  });
+
+  it('two sound readings with different amounts store neither', () => {
+    const { parsed, text } = photo('minas281-ticket');
+    const other = model('minas281', {
+      total: 91_000,
+      gravada5: 44_425,
+      gravada10: 46_575,
+      iva10: 4_234,
+      totalIva: 6_349,
+    });
+    expect(other.totalsAgree).toBe(true);
+    expect(decidePhoto(parsed, other, text, BUYER)).toMatchObject({
+      kind: 'refuse',
+      reason: 'lecturas',
+      detail: 'amounts',
+    });
+  });
+
+  const INVOICE = [
+    'VIELA S.A.',
+    'RUC: 80054993-7',
+    'Timbrado: 12345678',
+    'Factura Electrónica: 005-005-0141150',
+    'Fecha de emisión: 14/02/2026',
+    'Vence el 20/03/2026',
+    'Total Pago. Gs 237.500',
+    'Gravadas 10%: Gs 237.500',
+    'IVA 10%: Gs 21.591',
+  ];
+
+  it('the day it falls due is not the day it was issued', () => {
+    // The model took the due date for the emission date; it is printed, but
+    // as what it is, so the invoice keeps the date the parser read.
+    const text = INVOICE.join('\n');
+    const ai = fromExtraction({
+      ...aiFixture('minas281'),
+      emisorRuc: '80054993',
+      emisorDv: 7,
+      numeroDoc: '005-005-0141150',
+      fecha: '2026-03-20',
+      total: 237_500,
+      gravada5: 0,
+      iva5: 0,
+      gravada10: 237_500,
+      iva10: 21_591,
+      totalIva: 21_591,
+      items: [],
+    });
+    const decision = decidePhoto(parseReceipt(text), ai, text, BUYER);
+    expect(decision).toMatchObject({ kind: 'store' });
+    expect(decision.reading?.fechaEmision?.toISOString().slice(0, 10)).toBe('2026-02-14');
+  });
+
+  it('two dates both printed as the emission date store neither', () => {
+    // One photo of two invoices, or a reprint over the original.
+    const text = [...INVOICE, 'Fecha de emisión: 20/03/2026'].join('\n');
+    const parsed = parseReceipt(text);
+    expect(parsed.fechaEmision?.toISOString().slice(0, 10)).toBe('2026-02-14');
+
+    const ai = fromExtraction({
+      ...aiFixture('minas281'),
+      emisorRuc: '80054993',
+      emisorDv: 7,
+      numeroDoc: '005-005-0141150',
+      fecha: '2026-03-20',
+      total: 237_500,
+      gravada5: 0,
+      iva5: 0,
+      gravada10: 237_500,
+      iva10: 21_591,
+      totalIva: 21_591,
+      items: [],
+    });
+    expect(ai.fechaEmision?.toISOString().slice(0, 10)).toBe('2026-03-20');
+    expect(decidePhoto(parsed, ai, text, BUYER)).toMatchObject({
+      kind: 'refuse',
+      reason: 'lecturas',
+      detail: 'dates',
+    });
+  });
+});
+
+describe('the model alone is held to what Vision saw', () => {
+  const TEXT = [
+    'VIELA S.A.',
+    'RUC 80054993-7',
+    '005-005-0141150',
+    '14/02/2026',
+    '33.500 204.000',
+    '1.595 18.545',
+    '237.500',
+  ].join('\n');
+  const answer = (overrides: Partial<Extraction> = {}): Extraction => ({
+    ...aiFixture('minas281'),
+    emisorNombre: 'VIELA S.A.',
+    emisorRuc: '80054993',
+    emisorDv: 7,
+    timbrado: '12345678',
+    numeroDoc: '005-005-0141150',
+    fecha: '2026-02-14',
+    total: 237_500,
+    gravada5: 33_500,
+    gravada10: 204_000,
+    iva5: 1_595,
+    iva10: 18_545,
+    totalIva: 20_140,
+    exentas: null,
+    items: [],
+    ...overrides,
+  });
+
+  it('rescues a layout the parser could not read', () => {
+    const parsed = parseReceipt(TEXT);
+    expect(parsed.total).toBeNull(); // no label the parser knows
+
+    const decision = decidePhoto(parsed, fromExtraction(answer()), TEXT, BUYER);
+    expect(decision).toMatchObject({ kind: 'store', source: 'ai' });
+    expect(decision.reading).toMatchObject({
+      emisorRuc: '80054993',
+      total: 237_500,
+      iva5: 1_595,
+      iva10: 18_545,
+      timbrado: null, // the model read a timbrado Vision never saw
+    });
+  });
+
+  it('refuses amounts the text does not show, however well they add up', () => {
+    const invented = answer({ total: 240_000, gravada10: 206_500, iva10: 18_773, totalIva: 20_368 });
+    const reading = fromExtraction(invented);
+    expect(reading.totalsAgree).toBe(true);
+
+    const decision = decidePhoto(parseReceipt(TEXT), reading, TEXT, BUYER);
+    expect(decision).toMatchObject({ kind: 'refuse', detail: 'ai-unseen' });
+  });
+
+  it('refuses a tax figure the model worked out instead of reading', () => {
+    // gravada10 asserted equal to the total mints an IVA of total/11 that is
+    // on no line of the page, and one printed number — the total — would
+    // authorise it. A fully exempt invoice read this way would be taxed.
+    const guessed = fromExtraction(answer({ gravada10: 237_500, iva10: null, gravada5: null, iva5: null, totalIva: null, exentas: null }));
+    expect(guessed.totalsAgree).toBe(true); // it adds up, by construction
+    expect(guessed.iva10).toBe(21_591);
+    expect(witnessed(guessed, TEXT, BUYER).seen).toBe(false);
+    expect(decidePhoto(parseReceipt(TEXT), guessed, TEXT, BUYER)).toMatchObject({ kind: 'refuse' });
+  });
+
+  it('refuses an exchange rate whose guaraní total is not printed', () => {
+    const text = `${TEXT}\nCotizacion: 7.000`;
+    const invented = fromExtraction({
+      ...answer(),
+      moneda: 'USD',
+      tipoCambio: 7_000,
+      totalEnGuaranies: 237_500 * 7_000,
+    });
+    expect(invented.tipoCambio).toBe(7_000); // the model's own figures agree
+    expect(witnessed(invented, text, BUYER).seen).toBe(false);
+  });
+
+  it('keeps no line item the page does not show, amount and wording', () => {
+    const items = [
+      { descripcion: 'PERFUME IMPORTADO 100ML', cantidad: 1, precioUnitario: 200_000, total: 200_000, tasaIva: 10 },
+      { descripcion: 'SET DE COPAS', cantidad: 1, precioUnitario: 37_500, total: 37_500, tasaIva: 10 },
+    ];
+    // They add up to the total exactly; neither amount is printed.
+    expect(items.reduce((s, it) => s + it.total, 0)).toBe(237_500);
+    const { reading } = witnessed(fromExtraction(answer({ items })), TEXT, BUYER);
+    expect(reading.items).toEqual([]);
+
+    // An amount that is printed, under a description that is not.
+    const disguised = [{ descripcion: 'PERFUME IMPORTADO', cantidad: 1, precioUnitario: 237_500, total: 237_500, tasaIva: 10 }];
+    expect(witnessed(fromExtraction(answer({ items: disguised })), TEXT, BUYER).reading.items).toEqual([]);
+  });
+
+  it('keeps no name the page does not show', () => {
+    const { reading } = witnessed(
+      fromExtraction(answer({ emisorNombre: 'DISTRIBUIDORA INVENTADA SRL', receptorNombre: 'CLIENTE INVENTADO' })),
+      TEXT,
+      BUYER,
+    );
+    expect(reading.emisorNombre).toBeNull();
+    expect(reading.receptorNombre).toBeNull();
+    expect(reading.missing).toContain('Nombre del emisor');
+  });
+
+  it('files the invoice as a purchase when the model names the buyer as the issuer and no one else', () => {
+    // With no seller to swap in, the issuer is left unread: naming the user as
+    // the issuer turns a purchase into a sale, and its IVA from credit to debit.
+    const swapped = witnessed(
+      fromExtraction(answer({ emisorRuc: BUYER, emisorDv: 9, emisorNombre: 'XXXXX XXXXX', receptorRuc: null, cdc: null })),
+      `${TEXT}\nCI: 1111111-9`,
+      BUYER,
+    );
+    expect(swapped.reading.emisorRuc).toBeNull();
+    expect(swapped.reading.receptorRuc).toBe(BUYER);
+  });
+
+  it('turns the invoice back around when the model names the buyer as the issuer', () => {
+    const swapped = witnessed(
+      fromExtraction(answer({ emisorRuc: BUYER, emisorDv: 9, emisorNombre: 'XXXXX XXXXX', receptorRuc: '80054993', receptorNombre: 'VIELA S.A.', cdc: null })),
+      `${TEXT}\nCI: 1111111-9`,
+      BUYER,
+    );
+    expect(swapped.reading).toMatchObject({
+      emisorRuc: '80054993',
+      emisorNombre: 'VIELA S.A.',
+      receptorRuc: BUYER,
+    });
+  });
+
+  it('drops a date, a number and a RUC the text does not show', () => {
+    const { reading } = witnessed(
+      fromExtraction(answer({ fecha: '2026-02-15', numeroDoc: '005-005-0999999', emisorRuc: '80054994', emisorDv: 5, cdc: null })),
+      TEXT,
+      BUYER,
+    );
+    expect(reading).toMatchObject({ fechaEmision: null, numeroDoc: null, emisorRuc: null });
+    expect(reading.missing).toEqual(expect.arrayContaining(['RUC del emisor', 'Fecha']));
+  });
+});
+
+describe('reading the text for what it shows', () => {
+  it('reads an amount however its separators are printed', () => {
+    const cents = printedAmounts('Total 1.538,00 y 139,82 y 160.000 y 1,538.00 y 9.270.941');
+    for (const v of [1_538, 139.82, 160_000, 9_270_941]) expect(cents.has(Math.round(v * 100))).toBe(true);
+    expect(cents.has(Math.round(1_537 * 100))).toBe(false);
+  });
+
+  it('reads a date however it is printed', () => {
+    const d = new Date(Date.UTC(2026, 7, 18));
+    for (const text of ['18/08/2026', '18-8-26', '2026-08-18', '18 de agosto de 2026', 'emitida el 18.08.2026']) {
+      expect(dateSeen(text, d)).toBe(true);
+    }
+    for (const text of ['19/08/2026', '18/09/2026', '180820260']) expect(dateSeen(text, d)).toBe(false);
+  });
+
+  it('finds digits printed with separators, and not inside a longer number', () => {
+    expect(digitsSeen('RUC: 80.156.877-3', '80156877')).toBe(true);
+    expect(digitsSeen('CDC 0180 1568 7730', '018015687730')).toBe(true);
+    expect(digitsSeen('Factura 001-001-0000637', '0000637')).toBe(true);
+    // Not a number that merely contains them.
+    expect(digitsSeen('CDC 0180 1568 7730', '0180156877')).toBe(false);
+    expect(digitsSeen('Nro 1801568771', '80156877')).toBe(false);
+    // Nor an amount whose thousands separator happens to line up: a total of
+    // 1.637 vouched for document number 0000637.
+    expect(digitsSeen('TOTAL 1.637', '0000637')).toBe(false);
+    expect(digitsSeen('TOTAL 223.150', '0000150')).toBe(false);
+  });
+
+  it('finds a name through a misread letter, and a short one written as a run', () => {
+    // Vision read "CFBOLLA" where the paper says "CEBOLLA".
+    expect(nameSeen('11377 FYV CFBOLLA KG', 'FYV CEBOLLA KG')).toBe(true);
+    expect(nameSeen('NOMBRE: TEC BIO E.AS.', 'TEC BIO E.A.S')).toBe(true);
+    expect(nameSeen('11377 FYV CFBOLLA KG', 'PERFUME IMPORTADO')).toBe(false);
+    // One letter, not two.
+    expect(nameSeen('ALMACEN CFBXLLA', 'CEBOLLA')).toBe(false);
+  });
+});

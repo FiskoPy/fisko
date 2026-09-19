@@ -1,0 +1,32 @@
+{
+ "emisorNombre": "Baratao presentes",
+ "emisorRuc": "6700626",
+ "emisorDv": 4,
+ "receptorNombre": "XXXXXXX XXXXXX XXXXXXXXX XXXXXXX",
+ "receptorRuc": "1111111",
+ "timbrado": "18757069",
+ "numeroDoc": "001-001-0192529",
+ "fecha": "2026-09-16",
+ "tipoDocumento": "factura",
+ "moneda": "PYG",
+ "tipoCambio": null,
+ "totalEnGuaranies": null,
+ "total": 160000,
+ "gravada5": 0,
+ "gravada10": 14545,
+ "exentas": 0,
+ "iva5": 0,
+ "iva10": 14545,
+ "totalIva": 14545,
+ "redondeo": null,
+ "cdc": null,
+ "items": [
+  {
+   "descripcion": "NESECER TERMICO C/4PZS.",
+   "cantidad": 1,
+   "precioUnitario": 160000,
+   "total": 160000,
+   "tasaIva": 10
+  }
+ ]
+}

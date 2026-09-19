@@ -19,7 +19,7 @@ import { visionFixture, type VisionFixture } from './fixtures/vision';
 type Fiscal = Pick<ParsedReceipt, 'total' | 'gravada5' | 'iva5' | 'gravada10' | 'iva10'>;
 
 const MINAS: Fiscal = { total: 91_925, gravada5: 44_425, iva5: 2_115, gravada10: 47_500, iva10: 4_318 };
-const PAPER: Record<VisionFixture, Fiscal> = {
+const PAPER: Record<Exclude<VisionFixture, 'rrtop-usd-kude'>, Fiscal> = {
   'minas281-ticket': MINAS,
   'minas281-ticket-retake': MINAS,
   'fox-kude': { total: 48_000, gravada5: 0, iva5: 0, gravada10: 48_000, iva10: 4_364 },
@@ -32,7 +32,11 @@ const TOLERANCE: Record<keyof Fiscal, number> = { total: 0, iva5: 1, iva10: 1, g
 
 /** Would importPhoto refuse this reading? */
 const refused = (p: ParsedReceipt) =>
-  p.total == null || p.totalsAgree === false || p.nota != null || p.missing.includes('IVA');
+  p.total == null ||
+  p.totalsAgree === false ||
+  p.nota != null ||
+  p.missing.includes('IVA') ||
+  (p.foreignCurrency != null && p.tipoCambio == null);
 
 function warp(a: VisionAnnotation, f: (x: number, y: number) => [number, number]): VisionAnnotation {
   const copy = structuredClone(a);
@@ -98,7 +102,7 @@ const DISTORTIONS: [string, (a: VisionAnnotation, W: number, H: number) => Visio
 ];
 
 describe('a badly taken photo is read right or refused — never stored wrong', () => {
-  for (const name of Object.keys(PAPER) as VisionFixture[]) {
+  for (const name of Object.keys(PAPER) as (keyof typeof PAPER)[]) {
     it(name, () => {
       const original = visionFixture(name);
       const [W, H] = extent(original);
@@ -123,4 +127,29 @@ describe('a badly taken photo is read right or refused — never stored wrong', 
       expect(read).toBeGreaterThanOrEqual(DISTORTIONS.length * 0.6);
     });
   }
+});
+
+/**
+ * The dollar invoice has no row in PAPER: its amounts are in dollars, and the
+ * parser refuses it (no exchange rate on the photo, see photo-decision). What
+ * must hold under the same distortions is that it never passes for guaraníes
+ * — that is how Gs 1.538 was recorded for USD 1.538 on 2026-09-19.
+ */
+describe('a photo in another currency is never read as guaraníes', () => {
+  it('rrtop-usd-kude', () => {
+    const original = visionFixture('rrtop-usd-kude');
+    const [W, H] = extent(original);
+    let read = 0;
+
+    for (const [label, distort] of DISTORTIONS) {
+      const r = parseBest(layoutsOf(distort(original, W, H)));
+      if (!r || r.parsed.total == null) continue;
+      read++;
+      expect(`${label}: ${r.parsed.foreignCurrency}`).toBe(`${label}: USD`);
+    }
+    // Half, not the tickets' 60%: this is a dense A4 form whose amounts sit in
+    // a wide table, and a heavy curl or an upside-down page loses the total —
+    // which is refused, never guessed.
+    expect(read).toBeGreaterThanOrEqual(DISTORTIONS.length * 0.5);
+  });
 });

@@ -21,13 +21,18 @@ import type { VisionAnnotation } from '../../src/services/vision-layout';
  *  - minas281-ticket, minas281-ticket-retake: the one that came out right.
  *  - baratao-talonario: a pre-printed form (scanned, 2026-09-17) whose amounts
  *    sit above their labels; refused for "no IVA" on 2026-09-19.
+ *  - rrtop-usd-kude: a KuDE in US dollars, stored as Gs 1.538 on 2026-09-19.
+ *    The seller's, the agronomist's and a signature's names are masked (X),
+ *    and the CDC's security code as in tests/fixtures/ai/usd-rrtop.json. The
+ *    buyer on this one is the client's own company, and its purchase.
  */
 export type VisionFixture =
   | 'primavera-ticket'
   | 'fox-kude'
   | 'minas281-ticket'
   | 'minas281-ticket-retake'
-  | 'baratao-talonario';
+  | 'baratao-talonario'
+  | 'rrtop-usd-kude';
 
 export function visionFixture(name: VisionFixture): VisionAnnotation {
   return JSON.parse(readFileSync(join(__dirname, 'vision', `${name}.json`), 'utf8')) as VisionAnnotation;

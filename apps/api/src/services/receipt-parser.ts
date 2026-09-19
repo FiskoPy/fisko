@@ -22,7 +22,17 @@
  *     TOTAL GRAVADAS 10% GS:   13.326     <- tax, same label
  */
 
+import { isValidRucDv } from '../utils/ruc';
 import { isValidCdcCheckDigit } from './sifen';
+
+/** A line item, as a reader could list it. */
+export interface ParsedItem {
+  descripcion: string;
+  cantidad: number;
+  precioUnit: number;
+  total: number;
+  ivaRate: 0 | 5 | 10;
+}
 
 export interface ParsedReceipt {
   emisorRuc: string | null;
@@ -59,6 +69,13 @@ export interface ParsedReceipt {
    * photo path reads guaraníes, so importPhoto refuses these.
    */
   foreignCurrency: string | null;
+  /**
+   * Guaraníes per unit of foreignCurrency — set only when a reader read the
+   * rate and the printed guaraní total confirmed it (see fromExtraction).
+   */
+  tipoCambio: number | null;
+  /** Line items, when a reader listed them and they add up (see fromExtraction). */
+  items: ParsedItem[];
   /**
    * Whether the amounts agree with each other: TOTAL with gravadas + exentas,
    * give or take the rounding, and each IVA with its own gravada. null when
@@ -452,6 +469,7 @@ function totalsAgree(
   f: Fiscal,
   exentas: number | null,
   rounding: number | null,
+  unit = 1,
 ): boolean | null {
   if (total == null) return null;
   if (f.rejected) return false;
@@ -463,14 +481,18 @@ function totalsAgree(
   if (sum <= 0) return false;
   // Guaraníes are whole: printed parts add up to the total exactly. Only a
   // gravada computed from its IVA carries that IVA's rounding.
-  const slack = (f.derived?.includes('gravada5') ? 11 : 0) + (f.derived?.includes('gravada10') ? 6 : 0);
+  const slack =
+    unit * ((f.derived?.includes('gravada5') ? 11 : 0) + (f.derived?.includes('gravada10') ? 6 : 0));
   const expected = rounding ? [sum - rounding, sum + rounding] : [sum];
-  if (expected.some((e) => Math.abs(total - e) <= slack)) return true;
+  if (expected.some((e) => Math.abs(total - e) <= slack + 1e-9)) return true;
   // The same rounding with its line unread: Ley 347 rounds in the consumer's
   // favour, down to a multiple of 50 — so a total on a multiple of 50, less
   // than 50 under its parts. A misread digit rarely lands in that window.
+  // Strictly under 50: a gap of exactly 50 is a misread digit, not a rounding.
   const gap = sum - total;
-  return rounding == null && total % 50 === 0 && gap >= -slack && gap < 50 + slack;
+  return (
+    unit === 1 && rounding == null && total % 50 === 0 && gap >= -slack && gap < 50 + slack - 1e-9
+  );
 }
 
 /**
@@ -479,13 +501,16 @@ function totalsAgree(
  * Primavera ticket whose 5% lines were lost read 13.326 of IVA against a
  * printed 16.973, with its total and its 10% rate both consistent.
  */
-function ivaSumAgrees(f: Fiscal, totalIva: number | null): boolean {
+function ivaSumAgrees(f: Fiscal, totalIva: number | null, unit = 1): boolean {
   if (totalIva == null || (f.iva5 == null && f.iva10 == null)) return true;
   // An IVA computed from its gravada rounds once, on the total; a till that
   // rounds per line can print a sum a guaraní or two away from it.
-  const slack = 2 + 2 * (f.derived?.filter((d) => d.startsWith('iva')).length ?? 0);
+  const slack = unit * (2 + 2 * (f.derived?.filter((d) => d.startsWith('iva')).length ?? 0)) + 1e-9;
   return Math.abs((f.iva5 ?? 0) + (f.iva10 ?? 0) - totalIva) <= slack;
 }
+
+/** x rounded to a whole number of units (1 Gs, or 1 cent). */
+const roundTo = (x: number, unit: number): number => Math.round(x / unit) * unit;
 
 /**
  * Each IVA against its own gravada: IVA 10% = gravada / 11, IVA 5% = gravada
@@ -497,12 +522,12 @@ function ivaSumAgrees(f: Fiscal, totalIva: number | null): boolean {
  * base of 0 with the total intact. A value derived from the other side agrees
  * by construction; only two amounts the photo put side by side can fail.
  */
-function ratesAgree(f: Fiscal): boolean {
+function ratesAgree(f: Fiscal, unit = 1): boolean {
   for (const rate of [5, 10] as const) {
     const g = f[`gravada${rate}`];
     const i = f[`iva${rate}`];
     if (g == null || i == null) continue;
-    if (Math.abs(Math.round(g / DIVISOR[rate]) - i) > 1) return false;
+    if (Math.abs(roundTo(g / DIVISOR[rate], unit) - i) > unit + 1e-9) return false;
   }
   return true;
 }
@@ -573,15 +598,22 @@ function detachedIva(
     for (const j of [i - 1, i - 2, i - 3, i + 1, i + 2]) {
       const amounts = amountsRow(lines[j]);
       if (!amounts || amounts.length > slots.length) continue;
+      // A row of zeros says nothing about either slot, and every placement of
+      // it "fits": a taxed invoice went on record with no IVA at all when the
+      // exempt column had been misread as the total (review, 2026-09-19).
+      if (!amounts.some((v) => v > 0)) continue;
       const fits: { fiscal: Fiscal; totalIva: number | null }[] = [];
       for (const pick of placements(amounts.length, slots.length)) {
         const f: Fiscal = { ...base, derived: [...(base.derived ?? [])] };
         let tIva = printedTotalIva;
+        let ownTotalIva = false;
         pick.forEach((s, n) => {
           const slot = slots[s] as Slot;
           const v = amounts[n] as number;
-          if (slot === 'total') tIva = v;
-          else f[`iva${slot}`] = v;
+          if (slot === 'total') {
+            tIva = v;
+            ownTotalIva = true;
+          } else f[`iva${slot}`] = v;
         });
         if (f.iva5 == null && f.iva10 == null) continue;
         for (const rate of [5, 10] as const) {
@@ -589,9 +621,15 @@ function detachedIva(
           if (iv != null && iv > total / 10) f.rejected = true;
           if (f[`gravada${rate}`] == null && iv != null) {
             f[`gravada${rate}`] = Math.round(iv * DIVISOR[rate]);
-            f.derived = [...(f.derived ?? []), `gravada${rate}`];
+            // Nothing taxed at this rate is exact; only a real IVA carries the
+            // rounding that earns slack. Given to a zero, that slack let
+            // 160.010 and 160.009 pass for a printed 160.000.
+            if (iv !== 0) f.derived = [...(f.derived ?? []), `gravada${rate}`];
           }
         }
+        // The form's own T.IVA, read from this very row, is the sum of the two
+        // rates exactly — no slack, it is printed right there.
+        if (ownTotalIva && tIva != null && (f.iva5 ?? 0) + (f.iva10 ?? 0) !== tIva) continue;
         if (
           totalsAgree(total, f, exentas, rounding) === true &&
           ratesAgree(f) &&
@@ -613,22 +651,51 @@ function detachedIva(
   return null;
 }
 
+/** The currencies an invoice here is written in, by the names it calls them. */
+const CURRENCIES: [string, RegExp][] = [
+  // SIFEN's own name is "US Dollar", and a form prints "U$S" or "Dólares".
+  ['USD', /\busd\b|u\$s|us\$|d[oó]l+ar|dollar/],
+  ['BRL', /\bbrl\b|\breal(?:es)?\b|r\$|brazil/],
+  ['EUR', /\beur\b|euro/],
+  ['ARS', /\bars\b|peso\s*argentin/],
+];
+/** What the page calls the guaraní, when it says so itself. */
+const GUARANI = /guarani|\bpyg\b|\bg\s?s\b|₲/;
+/** A line where an amount is stated, as opposed to a currency merely mentioned. */
+const STATES_AMOUNT = /total|gravad|\biva\b|importe|subtotal|a\s*pagar|precio/;
+/** An exchange rate, an address or a payment clause is not the invoice's currency. */
+const NOT_CURRENCY = /cotiza|tipo\s*de\s*cambio|cambio\s*del\s*dia|@|www\./;
+
 /**
  * The currency the page names when it is not the guaraní — or null.
  *
  * Read in guaraníes, an invoice in dollars adds up just as well (1.538 over 11
  * is 139,82), so no arithmetic can tell it apart, and a USD KuDE was stored as
  * Gs 1.538 (2026-09-19). The page says its currency: on the "Moneda" line of a
- * KuDE, or as U$S / USD next to its amounts.
+ * KuDE — where the value can fall to the line below when two columns are
+ * rebuilt — or beside its amounts.
+ *
+ * A mention on its own is not enough. "Dólares" appears in the clause about
+ * paying at the day's rate, and beside a rate quoted on a guaraní invoice;
+ * reading those as the currency refuses a ticket that used to be stored right.
+ * So: what the Moneda label names, and otherwise only what a line stating an
+ * amount names.
  */
 function readForeignCurrency(lines: string[]): string | null {
+  for (let i = 0; i < lines.length; i++) {
+    const low = norm(lines[i] as string);
+    const labelled = low.match(/\bmoneda\b\W*(.*)$/);
+    if (!labelled) continue;
+    const value = ((labelled[1] as string).trim() || norm(lines[i + 1] ?? '')).slice(0, 24);
+    if (GUARANI.test(value)) return null;
+    const found = CURRENCIES.find(([, re]) => re.test(value));
+    if (found) return found[0] as string;
+  }
   for (const line of lines) {
     const low = norm(line);
-    const named = low.match(/\bmoneda\b\W*(.*)$/)?.[1] ?? '';
-    if (/usd|u\$s|us\$|dolar/.test(named)) return 'USD';
-    if (/\bbrl\b|\breal(?:es)?\b|r\$/.test(named)) return 'BRL';
-    if (/\beur\b|euro/.test(named)) return 'EUR';
-    if (/(?:^|[^a-z])(?:u\$s|us\$|usd)(?:$|[^a-z])|\bdolar(?:es)?\b/.test(low)) return 'USD';
+    if (!STATES_AMOUNT.test(low) || NOT_CURRENCY.test(low)) continue;
+    const found = CURRENCIES.find(([, re]) => re.test(low));
+    if (found) return found[0] as string;
   }
   return null;
 }
@@ -778,18 +845,31 @@ function readCdc(
   numeroDoc: string | null,
   fecha: Date | null,
 ): string | null {
-  const doc = numeroDoc ? docDigits(numeroDoc) : null;
-  if (!ruc || !doc || !fecha || printed.length !== 1) return null;
-  const ymd = fecha.toISOString().slice(0, 10).replace(/-/g, '');
-
+  if (printed.length !== 1) return null;
   const [c] = printed as [string];
-  const matches =
+  return cdcFits(c, ruc, numeroDoc, fecha) ? c : null;
+}
+
+/**
+ * Whether an invoice CDC (type 01) is valid and names this issuer, number and
+ * date — the check that makes a printed CDC trustworthy (see readCdc).
+ */
+export function cdcFits(
+  c: string,
+  ruc: string | null,
+  numeroDoc: string | null,
+  fecha: Date | null,
+): boolean {
+  const doc = numeroDoc ? docDigits(numeroDoc) : null;
+  if (!ruc || !doc || !fecha || !isValidCdcCheckDigit(c)) return false;
+  const ymd = fecha.toISOString().slice(0, 10).replace(/-/g, '');
+  return (
     c.startsWith('01') &&
     Number(c.slice(2, 10)) === Number(ruc) &&
     c.slice(11, 24) === doc &&
     c.slice(25, 33) === ymd &&
-    (c[33] === '1' || c[33] === '2');
-  return matches ? c : null;
+    (c[33] === '1' || c[33] === '2')
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -839,8 +919,12 @@ export function parseReceipt(text: string): ParsedReceipt {
     header.find((l) => nameLike(l) && !buyerLabel.test(l) && LEGAL_FORM.test(l)) ??
     header.find(nameLike) ??
     null;
-  // A two-column header can put the RUC on the name's row; the name ends there.
-  const emisorNombre = named?.replace(/\s*\br\.?\s*u\.?\s*c\b.*$/i, '').trim() || named;
+  // A two-column header can put the RUC, or the shop's phone and address, on
+  // the name's row ("RR TOP AGRO E.A.S. Cel: (0981) ..."); the name ends there.
+  const emisorNombre =
+    named
+      ?.replace(/\s*(?:\br\.?\s*u\.?\s*c\b|\b(?:cel|tel[eé]?f?(?:ono)?|e-?mail)\s*[:.]).*$/i, '')
+      .trim() || named;
 
   const receptorNombre = readReceptorNombre(lines);
 
@@ -928,6 +1012,8 @@ export function parseReceipt(text: string): ParsedReceipt {
     cdc,
     nota,
     foreignCurrency,
+    tipoCambio: null,
+    items: [],
     totalsAgree: agree,
     derived: fiscal.derived ?? [],
     missing: [],
@@ -1044,8 +1130,13 @@ export function parseBest(
     p.missing.push(TOTALS_DISAGREE);
   }
 
-  // A note is a note, whichever reading found its title.
+  // A note is a note, whichever reading found its title — and so is a
+  // currency: the layout that read the Moneda line may not be the one that
+  // won on score, and reading a dollar invoice as guaraníes is the one
+  // mistake no arithmetic here can catch.
   p.nota ??= readings.find((r) => r.parsed.nota)?.parsed.nota ?? null;
+  p.foreignCurrency ??=
+    readings.find((r) => r.parsed.foreignCurrency)?.parsed.foreignCurrency ?? null;
   return best;
 }
 
@@ -1097,4 +1188,207 @@ export function layoutSkeleton(text: string, maxChars = 1500): string {
     )
     .join('\n')
     .slice(0, maxChars);
+}
+
+// ---------------------------------------------------------------------------
+// Readings from elsewhere
+
+/** What a reader other than the OCR parser extracts (see ai-reader). */
+export interface Extraction {
+  emisorNombre: string | null;
+  emisorRuc: string | null;
+  emisorDv: number | null;
+  receptorNombre: string | null;
+  receptorRuc: string | null;
+  timbrado: string | null;
+  numeroDoc: string | null;
+  fecha: string | null;
+  tipoDocumento: 'factura' | 'nota_credito' | 'nota_debito' | 'otro';
+  moneda: 'PYG' | 'USD' | 'BRL' | 'EUR' | 'OTRA';
+  tipoCambio: number | null;
+  totalEnGuaranies: number | null;
+  total: number | null;
+  gravada5: number | null;
+  gravada10: number | null;
+  exentas: number | null;
+  iva5: number | null;
+  iva10: number | null;
+  totalIva: number | null;
+  redondeo: number | null;
+  cdc: string | null;
+  items: {
+    descripcion: string;
+    cantidad: number | null;
+    precioUnitario: number | null;
+    total: number | null;
+    tasaIva: number | null;
+  }[];
+}
+
+const clean = (v: string | null): string | null => {
+  const t = v?.replace(/\s+/g, ' ').trim();
+  return t ? t.slice(0, 120) : null;
+};
+const digitsOnly = (v: string | null): string => (v ?? '').replace(/\D/g, '');
+const amount = (v: number | null): number | null =>
+  v != null && Number.isFinite(v) && v >= 0 ? v : null;
+
+/**
+ * Another reader's extraction, held to the same rules as a parsed photo.
+ *
+ * The amounts face the same arithmetic — total against gravadas and exentas,
+ * each IVA against its gravada, the IVA total — in guaraníes or, for another
+ * currency, in cents. Identifiers are checked where they can be: a RUC by its
+ * check digit, a CDC by its own and by the RUC, number and date it encodes. A
+ * CDC that fits also settles who issued the invoice: the model once named the
+ * buyer as the issuer. An invoice in another currency keeps its exchange rate
+ * only when the printed guaraní total confirms it. Line items stay only when
+ * they add up to the total.
+ */
+export function fromExtraction(x: Extraction): ParsedReceipt {
+  const foreign = x.moneda !== 'PYG' ? (x.moneda === 'OTRA' ? 'OTRA' : x.moneda) : null;
+  const unit = foreign ? 0.01 : 1;
+
+  let emisorRuc = digitsOnly(x.emisorRuc) || null;
+  let emisorDv = x.emisorDv;
+  let emisorNombre = clean(x.emisorNombre);
+  let receptorRuc = digitsOnly(x.receptorRuc) || null;
+  let receptorNombre = clean(x.receptorNombre);
+  if (emisorRuc && (emisorDv == null || !isValidRucDv(emisorRuc, emisorDv))) {
+    emisorRuc = null;
+    emisorDv = null;
+  }
+
+  const numeroDoc = x.numeroDoc && docDigits(x.numeroDoc) ? clean(x.numeroDoc) : null;
+  const ymd = x.fecha?.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  let fechaEmision: Date | null = ymd
+    ? new Date(Date.UTC(Number(ymd[1]), Number(ymd[2]) - 1, Number(ymd[3])))
+    : null;
+  if (
+    fechaEmision &&
+    (!plausible(fechaEmision) || fechaEmision.getUTCDate() !== Number(ymd?.[3]))
+  ) {
+    fechaEmision = null;
+  }
+
+  // A note has its own document type, and the CDC carries it: 05 for a credit
+  // note, 06 for a debit note. The model calling it a factura does not make it
+  // one — a refund would be added to the IVA credit instead of subtracted.
+  let nota: 'credito' | 'debito' | null =
+    x.tipoDocumento === 'nota_credito' ? 'credito' : x.tipoDocumento === 'nota_debito' ? 'debito' : null;
+  let cdc: string | null = null;
+  const c = digitsOnly(x.cdc);
+  if (c.length === 44 && isValidCdcCheckDigit(c)) {
+    if (c.startsWith('05')) nota = 'credito';
+    else if (c.startsWith('06')) nota = 'debito';
+  }
+  if (c.length === 44) {
+    const cdcRuc = String(Number(c.slice(2, 10)));
+    if (cdcFits(c, cdcRuc, numeroDoc, fechaEmision)) {
+      cdc = c;
+      if (emisorRuc !== cdcRuc && digitsOnly(x.receptorRuc) === cdcRuc) {
+        [emisorNombre, receptorNombre] = [receptorNombre, emisorNombre];
+        receptorRuc = (emisorRuc ?? digitsOnly(x.emisorRuc)) || null;
+      }
+      emisorRuc = cdcRuc;
+      emisorDv = Number(c[10]);
+    }
+  }
+
+  const total = amount(x.total);
+  const exentas = amount(x.exentas);
+  const f: Fiscal = {
+    gravada5: amount(x.gravada5),
+    gravada10: amount(x.gravada10),
+    iva5: amount(x.iva5),
+    iva10: amount(x.iva10),
+    derived: [],
+  };
+  for (const rate of [5, 10] as const) {
+    const g = f[`gravada${rate}`];
+    const i = f[`iva${rate}`];
+    if (i != null && total != null && i > total / 10) f.rejected = true;
+    if (g != null && i == null) {
+      f[`iva${rate}`] = roundTo(g / DIVISOR[rate], unit);
+      (f.derived ??= []).push(`iva${rate}`);
+    } else if (g == null && i != null) {
+      f[`gravada${rate}`] = roundTo(i * DIVISOR[rate], unit);
+      (f.derived ??= []).push(`gravada${rate}`);
+    }
+  }
+  const totalIva = amount(x.totalIva);
+  // A Ley 347 rounding is under 100 Gs (see readRounding); anything else is a
+  // gap the model wrote to make its own figures add up.
+  const redondeo = amount(x.redondeo);
+  let agree = totalsAgree(total, f, exentas, !foreign && redondeo != null && redondeo <= 100 ? redondeo : null, unit);
+  if (!ratesAgree(f, unit) || !ivaSumAgrees(f, totalIva, unit)) agree = false;
+
+  // Another currency is converted only at a rate the invoice itself confirms.
+  let tipoCambio: number | null = null;
+  if (foreign && total != null && x.tipoCambio && x.tipoCambio > 0 && x.totalEnGuaranies) {
+    const gs = total * x.tipoCambio;
+    if (Math.abs(gs - x.totalEnGuaranies) <= Math.max(2, x.totalEnGuaranies * 0.0005)) {
+      tipoCambio = x.tipoCambio;
+    }
+  }
+
+  const items: ParsedItem[] = x.items
+    .filter((it) => it.total != null && it.total >= 0 && clean(it.descripcion))
+    .map((it) => ({
+      descripcion: clean(it.descripcion) as string,
+      cantidad: it.cantidad != null && it.cantidad > 0 ? it.cantidad : 1,
+      precioUnit: it.precioUnitario != null && it.precioUnitario >= 0 ? it.precioUnitario : (it.total as number),
+      total: it.total as number,
+      ivaRate: it.tasaIva === 5 || it.tasaIva === 10 ? it.tasaIva : 0,
+    }));
+
+  const parsed: ParsedReceipt = {
+    emisorRuc,
+    emisorDv,
+    emisorNombre,
+    receptorRuc,
+    receptorNombre,
+    timbrado: digitsOnly(x.timbrado) || null,
+    numeroDoc,
+    fechaEmision,
+    total,
+    gravada5: f.gravada5,
+    gravada10: f.gravada10,
+    exentas,
+    iva5: f.iva5,
+    iva10: f.iva10,
+    totalIva,
+    cdc,
+    nota,
+    foreignCurrency: foreign,
+    tipoCambio,
+    items,
+    totalsAgree: agree,
+    derived: f.derived ?? [],
+    missing: [],
+    confidence: 0,
+  };
+
+  const required: [keyof ParsedReceipt, string][] = [
+    ['emisorRuc', 'RUC del emisor'],
+    ['emisorNombre', 'Nombre del emisor'],
+    ['fechaEmision', 'Fecha'],
+    ['total', 'Total'],
+  ];
+  parsed.missing = required.filter(([k]) => parsed[k] == null).map(([, label]) => label);
+  const exemptOnly =
+    agree === true && exentas != null && f.gravada5 == null && f.gravada10 == null;
+  if (parsed.iva5 == null && parsed.iva10 == null && !exemptOnly) parsed.missing.push('IVA');
+  if (agree === false) parsed.missing.push(TOTALS_DISAGREE);
+
+  // Items that do not add up to the total are not this invoice's.
+  const sum = items.reduce((s, it) => s + it.total, 0);
+  if (total == null || Math.abs(sum - total) > unit * Math.max(1, items.length) + 1e-9) {
+    const gap = total == null ? Infinity : sum - total;
+    if (!(unit === 1 && gap > 0 && gap < 50)) parsed.items = [];
+  }
+
+  const signals = [emisorRuc, emisorNombre, fechaEmision, total, parsed.iva5 != null || parsed.iva10 != null ? 1 : null, numeroDoc];
+  parsed.confidence = signals.filter(Boolean).length / signals.length;
+  return parsed;
 }

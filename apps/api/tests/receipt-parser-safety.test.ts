@@ -570,12 +570,34 @@ describe('amounts printed apart from their labels, as on a pre-printed form', ()
     expect(p.totalsAgree).toBe(true);
   });
 
-  it('accepts placements that fit in more than one way but give the same tax', () => {
+  it('does not read a lone zero as the whole IVA, however well it fits', () => {
+    // Every placement of a zero "fits", because it changes nothing — and when
+    // the exempt column has been misread as the total, a Gs 160.000 invoice
+    // taxed at 10% went on record with no IVA and nothing flagged (review,
+    // 2026-09-19). A row that carries no amount is not a reading of the IVA.
     const p = parseReceipt(
       lines('TOTAL: 50.000', 'TOTAL EXENTAS: 50.000', '0', 'LIQUIDACION DEL IVA (5%) (10%)'),
     );
-    expect((p.iva5 ?? 0) + (p.iva10 ?? 0)).toBe(0);
-    expect(p.missing).not.toContain('IVA');
+    expect(p.iva5).toBeNull();
+    expect(p.iva10).toBeNull();
+    expect(p.missing).toContain('IVA');
+  });
+
+  it('refuses the same page when the exempt column was the total misread', () => {
+    // The shape the review reproduced: the 10% IVA (14.545) sits out of the
+    // window and only the 5% zero is beside the labels.
+    const p = parseReceipt(
+      lines(
+        'CODIGO CANT./DESCRIPCION P. UNITARIO 5% 10% EXENTAS',
+        '160.000',
+        '0428 1 NESECER TERMICO C/4PZS. 160.000',
+        'TOTAL A PAGAR 160.000',
+        '14.545 14.545',
+        '0',
+        'LIQUIDACION DEL I.V.A.: (5%) (10%) T.IVA:',
+      ),
+    );
+    expect(p.missing).toContain('IVA');
   });
 
   it('leaves the IVA unread when no placement adds up', () => {
@@ -615,5 +637,73 @@ describe('an invoice in a foreign currency', () => {
     const p = parseReceipt(lines('KuDE de Factura Electrónica', 'Moneda: Guarani', 'Total: 48.000'));
     expect(p.foreignCurrency).toBeNull();
     expect(parseReceipt(RECEIPT_B_TEXT).foreignCurrency).toBeNull();
+  });
+
+  it("is recognised by SIFEN's own names, and by a value on the line below", () => {
+    // The XML calls it "US Dollar", and the KuDE prints what the XML says; a
+    // rebuilt two-column row can leave the value under its label.
+    expect(parseReceipt(lines('Moneda: US Dollar', 'Total: 1.538,00')).foreignCurrency).toBe('USD');
+    expect(parseReceipt(lines('Moneda:', 'USD', 'Total: 1.538,00')).foreignCurrency).toBe('USD');
+    expect(parseReceipt(lines('Moneda: Real', 'Total: 1.538,00')).foreignCurrency).toBe('BRL');
+    expect(parseReceipt(lines('Moneda: Euro', 'Total: 1.538,00')).foreignCurrency).toBe('EUR');
+  });
+
+  it('is not claimed from a payment clause, an exchange rate or a buyer beside the label', () => {
+    // Each of these refused a guaraní ticket that used to be stored right.
+    const clause = 'Pagaré el importe en dólares americanos o su equivalente al cambio del día';
+    expect(parseReceipt(lines(clause, 'TOTAL A PAGAR: 160.000')).foreignCurrency).toBeNull();
+    expect(parseReceipt(lines('Cotizacion dolar: 7.000', 'TOTAL: 160.000')).foreignCurrency).toBeNull();
+    expect(parseReceipt(lines('Moneda: Guarani Sres: DOLARES DEL ESTE SA', 'Total: 48.000')).foreignCurrency).toBeNull();
+    expect(parseReceipt(lines('E-mail: usd@ventas.com.py', 'Total: 48.000')).foreignCurrency).toBeNull();
+  });
+
+  it('is carried from whichever reading of the photo found it', () => {
+    // The layout that reads the Moneda line need not be the one that wins on
+    // score, and no arithmetic can catch a dollar invoice read as guaraníes.
+    const withCurrency = lines('Moneda: US Dollar', 'TOTAL A PAGAR: 1.538,00', 'IVA 10%: 139,82');
+    const best = parseBest([
+      { layout: 'rows', text: lines('TOTAL A PAGAR: 1.538,00', 'IVA 10%: 139,82') },
+      { layout: 'blocks', text: withCurrency },
+    ]);
+    expect(best?.parsed.foreignCurrency).toBe('USD');
+  });
+});
+
+describe('a gap that is not a rounding', () => {
+  it('refuses parts exactly 50 Gs above the total', () => {
+    // Ley 347 rounds down to a multiple of 50, so the gap is under 50; at
+    // exactly 50 it is a misread digit, and the window was inclusive.
+    const p = parseReceipt(
+      lines('TOTAL A PAGAR 160.000', 'GRAVADAS 10%: 160.050', 'IVA 10%: 14.550'),
+    );
+    expect(p.totalsAgree).toBe(false);
+  });
+
+  it('refuses a talonario total a digit out from its detached IVA', () => {
+    // The zero rate's derived gravada was adding 11 Gs of slack of its own,
+    // and these were stored as printed. Refused now — as contradicted, or
+    // with the IVA left unread, which importPhoto refuses just the same.
+    // Not 160.001: a gravada read from its IVA is only known to ±6 Gs
+    // (14.545 × 11 is 159.995, and 160.001 sits inside that), so a misread
+    // digit that close cannot be told from the rounding. It is worth one
+    // guaraní on the record.
+    for (const total of ['160.010', '160.009']) {
+      const p = parseReceipt(
+        lines(
+          `TOTAL A PAGAR ${total}`,
+          '0 14.545 14.545',
+          'LIQUIDACIÓN DEL I.V.A.: (5%) (10%) T.IVA:',
+        ),
+      );
+      const refused = p.totalsAgree === false || p.missing.includes('IVA');
+      expect(`${total}: ${refused}`).toBe(`${total}: true`);
+    }
+  });
+
+  it('still reads the talonario as printed', () => {
+    const p = parseReceipt(
+      lines('TOTAL A PAGAR 160.000', '0 14.545 14.545', 'LIQUIDACIÓN DEL I.V.A.: (5%) (10%) T.IVA:'),
+    );
+    expect(p).toMatchObject({ total: 160_000, iva5: 0, iva10: 14_545, totalsAgree: true });
   });
 });
