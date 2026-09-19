@@ -55,6 +55,11 @@ export interface ParsedReceipt {
    */
   nota: 'credito' | 'debito' | null;
   /**
+   * The currency the page names when it is not the guaraní ("USD", ...). The
+   * photo path reads guaraníes, so importPhoto refuses these.
+   */
+  foreignCurrency: string | null;
+  /**
    * Whether the amounts agree with each other: TOTAL with gravadas + exentas,
    * give or take the rounding, and each IVA with its own gravada. null when
    * there was nothing to compare.
@@ -399,7 +404,12 @@ function totalCandidates(lines: string[]): TotalCandidate[] {
     // it; failing that, a next line holding only an amount.
     const at = low.match(hit[0]) as RegExpMatchArray;
     const beside = lastNumber(low.slice((at.index ?? 0) + at[0].length));
-    const value = beside ?? amountOnly(lines[index + 1]);
+    // Failing beside and below, the line above — but only for the labels a
+    // pre-printed form uses ("TOTAL A PAGAR"), which prints the amount at the
+    // top of its cell and the label at the bottom. Letting any "Total" reach
+    // up let a badly keystoned KuDE borrow an amount and store its 10% as 5%.
+    const above = hit[1] >= 90 ? amountOnly(lines[index - 1]) : null;
+    const value = beside ?? amountOnly(lines[index + 1]) ?? above;
     if (value == null || value <= 0) return;
     out.push({ rank: hit[1], value, index, borrowed: beside == null });
   });
@@ -495,6 +505,132 @@ function ratesAgree(f: Fiscal): boolean {
     if (Math.abs(Math.round(g / DIVISOR[rate]) - i) > 1) return false;
   }
   return true;
+}
+
+/** Every amount on a line that holds nothing but amounts (and "Gs"), or null. */
+function amountsRow(line: string | undefined): number[] | null {
+  if (!line) return null;
+  const tokens = line
+    .trim()
+    .split(/\s+/)
+    .filter((t) => !/^(?:g\s*s\.?|₲|[:.|/])$/i.test(t));
+  if (!tokens.length || tokens.length > 4) return null;
+  const values = tokens.map((t) =>
+    /^(?:\d{1,3}(?:\.\d{3})+|\d+)(?:,\d+)?$/.test(t) ? parseAmount(t) : null,
+  );
+  return values.every((v) => v != null) ? (values as number[]) : null;
+}
+
+type Slot = 5 | 10 | 'total';
+
+/** Every way to place k amounts into m slots, keeping their left-to-right order. */
+function placements(k: number, m: number): number[][] {
+  const out: number[][] = [];
+  const walk = (start: number, picked: number[]): void => {
+    if (picked.length === k) {
+      out.push(picked);
+      return;
+    }
+    for (let s = start; s <= m - (k - picked.length); s++) walk(s + 1, [...picked, s]);
+  };
+  walk(0, []);
+  return out;
+}
+
+/**
+ * IVA amounts printed apart from their labels, as a pre-printed form does:
+ *     0          14.545       14.545
+ *     LIQUIDACIÓN DEL I.V.A.: (5%)   (10%)   T.IVA:
+ * The form prints each amount at the top of its cell and the label at the
+ * bottom, so the rebuilt rows split them, and a Gs 160.000 talonario was
+ * refused for "no IVA" (2026-09-19).
+ *
+ * Which amount belongs to which slot is decided by arithmetic, not by
+ * position: every left-to-right placement of the amounts is tried, and one is
+ * kept only if it alone makes the footer agree — the total with its gravadas,
+ * each IVA with its gravada, and the printed IVA total. Two that fit, or none,
+ * leave the IVA unread.
+ */
+function detachedIva(
+  lines: string[],
+  total: number | null,
+  base: Fiscal,
+  exentas: number | null,
+  rounding: number | null,
+  printedTotalIva: number | null,
+): { fiscal: Fiscal; totalIva: number | null } | null {
+  if (total == null) return null;
+  for (let i = 0; i < lines.length; i++) {
+    const low = norm(lines[i] as string);
+    if (!/liquidac|\biva\b/.test(low)) continue;
+    const slots: Slot[] = [
+      ...low.matchAll(/(?<!\d)0?(10|5)\s*%|\bt\.?\s*iva\b|\btotal\s+(?:del\s+)?iva\b/g),
+    ].map((m) => (m[1] ? (Number(m[1]) as 5 | 10) : 'total'));
+    if (!slots.some((s) => s !== 'total')) continue;
+    // A label line that prints its own amounts is not detached from them.
+    if (/\d[\d.]{2,}/.test(low.replace(/(?<!\d)0?(?:10|5)\s*%/g, ''))) continue;
+
+    for (const j of [i - 1, i - 2, i - 3, i + 1, i + 2]) {
+      const amounts = amountsRow(lines[j]);
+      if (!amounts || amounts.length > slots.length) continue;
+      const fits: { fiscal: Fiscal; totalIva: number | null }[] = [];
+      for (const pick of placements(amounts.length, slots.length)) {
+        const f: Fiscal = { ...base, derived: [...(base.derived ?? [])] };
+        let tIva = printedTotalIva;
+        pick.forEach((s, n) => {
+          const slot = slots[s] as Slot;
+          const v = amounts[n] as number;
+          if (slot === 'total') tIva = v;
+          else f[`iva${slot}`] = v;
+        });
+        if (f.iva5 == null && f.iva10 == null) continue;
+        for (const rate of [5, 10] as const) {
+          const iv = f[`iva${rate}`];
+          if (iv != null && iv > total / 10) f.rejected = true;
+          if (f[`gravada${rate}`] == null && iv != null) {
+            f[`gravada${rate}`] = Math.round(iv * DIVISOR[rate]);
+            f.derived = [...(f.derived ?? []), `gravada${rate}`];
+          }
+        }
+        if (
+          totalsAgree(total, f, exentas, rounding) === true &&
+          ratesAgree(f) &&
+          ivaSumAgrees(f, tIva)
+        ) {
+          fits.push({ fiscal: f, totalIva: tIva });
+        }
+      }
+      // Several placements may fit yet give the same IVA — a lone zero under
+      // (5%) or (10%) is zero either way. Only placements that disagree on
+      // the tax are a real ambiguity, and those leave it unread.
+      const taxOf = (x: { fiscal: Fiscal }) => `${x.fiscal.iva5 ?? 0}/${x.fiscal.iva10 ?? 0}`;
+      if (fits.length && fits.every((x) => taxOf(x) === taxOf(fits[0] as { fiscal: Fiscal }))) {
+        return fits[0] as { fiscal: Fiscal; totalIva: number | null };
+      }
+      if (fits.length) return null;
+    }
+  }
+  return null;
+}
+
+/**
+ * The currency the page names when it is not the guaraní — or null.
+ *
+ * Read in guaraníes, an invoice in dollars adds up just as well (1.538 over 11
+ * is 139,82), so no arithmetic can tell it apart, and a USD KuDE was stored as
+ * Gs 1.538 (2026-09-19). The page says its currency: on the "Moneda" line of a
+ * KuDE, or as U$S / USD next to its amounts.
+ */
+function readForeignCurrency(lines: string[]): string | null {
+  for (const line of lines) {
+    const low = norm(line);
+    const named = low.match(/\bmoneda\b\W*(.*)$/)?.[1] ?? '';
+    if (/usd|u\$s|us\$|dolar/.test(named)) return 'USD';
+    if (/\bbrl\b|\breal(?:es)?\b|r\$/.test(named)) return 'BRL';
+    if (/\beur\b|euro/.test(named)) return 'EUR';
+    if (/(?:^|[^a-z])(?:u\$s|us\$|usd)(?:$|[^a-z])|\bdolar(?:es)?\b/.test(low)) return 'USD';
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -699,10 +835,12 @@ export function parseReceipt(text: string): ParsedReceipt {
   // shop's logo ("AP FOX"), which is a brand, not the issuer.
   // …but not the buyer's, whose company can carry one too.
   const buyerLabel = /nombre|az[oó]n\s*social|liente|se[ñn]or|\bsres?\b|\bsr\.?\s*\(es\)/i;
-  const emisorNombre =
+  const named =
     header.find((l) => nameLike(l) && !buyerLabel.test(l) && LEGAL_FORM.test(l)) ??
     header.find(nameLike) ??
     null;
+  // A two-column header can put the RUC on the name's row; the name ends there.
+  const emisorNombre = named?.replace(/\s*\br\.?\s*u\.?\s*c\b.*$/i, '').trim() || named;
 
   const receptorNombre = readReceptorNombre(lines);
 
@@ -719,6 +857,7 @@ export function parseReceipt(text: string): ParsedReceipt {
         ? 'debito'
         : null;
   const cdc = nota ? null : readCdc(printed, emisor?.ruc ?? null, numeroDoc, fechaEmision);
+  const foreignCurrency = readForeignCurrency(lines);
 
   // "Exentas 300.000 0": a KuDE prints the amount and then its IVA column, so
   // the LAST number on that line is the tax, not the exempt amount — read as
@@ -742,7 +881,7 @@ export function parseReceipt(text: string): ParsedReceipt {
   // line, and from the first one that carries an amount: the first match can
   // be the item table's header ("CANTIDAD UNITARIO TOTAL IVA"), which
   // silently switched the check off.
-  const totalIva =
+  let totalIva =
     lines
       .map((l) => {
         const n = norm(l);
@@ -751,8 +890,18 @@ export function parseReceipt(text: string): ParsedReceipt {
       .find((v) => v != null) ?? null;
 
   const best = totalCandidates(lines)[0] ?? null;
-  const fiscal = readFiscal(lines, best?.value ?? null);
-  let agree = totalsAgree(best?.value ?? null, fiscal, exentas, readRounding(lines));
+  const rounding = readRounding(lines);
+  let fiscal = readFiscal(lines, best?.value ?? null);
+  // No IVA beside or under any label: a pre-printed form may carry it in a row
+  // of its own, above or below its labels (see detachedIva).
+  if (fiscal.iva5 == null && fiscal.iva10 == null) {
+    const detached = detachedIva(lines, best?.value ?? null, fiscal, exentas, rounding, totalIva);
+    if (detached) {
+      fiscal = detached.fiscal;
+      totalIva = detached.totalIva;
+    }
+  }
+  let agree = totalsAgree(best?.value ?? null, fiscal, exentas, rounding);
   if (!ratesAgree(fiscal) || !ivaSumAgrees(fiscal, totalIva)) agree = false;
   // An amount taken from the line under its label may belong to another label
   // — a KuDE's last item sits right under "Total:" — so it stands only when
@@ -778,6 +927,7 @@ export function parseReceipt(text: string): ParsedReceipt {
     totalIva,
     cdc,
     nota,
+    foreignCurrency,
     totalsAgree: agree,
     derived: fiscal.derived ?? [],
     missing: [],

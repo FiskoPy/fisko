@@ -541,3 +541,79 @@ describe('what a scrambled or partial page must not become', () => {
     expect(p.emisorNombre).toBe('MINAS281 MERCADO');
   });
 });
+
+describe('amounts printed apart from their labels, as on a pre-printed form', () => {
+  it('takes the IVA row above the labels when only one placement adds up', () => {
+    // The layout the client's phone photo produced (production log, 2026-09-19).
+    const p = parseReceipt(
+      lines(
+        'RUC: 6700626-4',
+        '16 DE SEPTIEMBRE DE 2026',
+        'TOTAL A PAGAR 160.000',
+        '14.545 14.545',
+        'I.V.A.: ( :',
+        'LIQUIDACION DEL 5%) (10%) T.IVA',
+      ),
+    );
+    expect(p.iva10).toBe(14_545);
+    expect(p.iva5).toBeNull();
+    expect(p.totalIva).toBe(14_545);
+    expect(p.totalsAgree).toBe(true);
+  });
+
+  it('takes the row below the labels as well', () => {
+    const p = parseReceipt(
+      lines('TOTAL A PAGAR 160.000', 'LIQUIDACIÓN DEL I.V.A.: (5%) (10%) T.IVA:', '0 14.545 14.545'),
+    );
+    expect(p.iva5).toBe(0);
+    expect(p.iva10).toBe(14_545);
+    expect(p.totalsAgree).toBe(true);
+  });
+
+  it('accepts placements that fit in more than one way but give the same tax', () => {
+    const p = parseReceipt(
+      lines('TOTAL: 50.000', 'TOTAL EXENTAS: 50.000', '0', 'LIQUIDACION DEL IVA (5%) (10%)'),
+    );
+    expect((p.iva5 ?? 0) + (p.iva10 ?? 0)).toBe(0);
+    expect(p.missing).not.toContain('IVA');
+  });
+
+  it('leaves the IVA unread when no placement adds up', () => {
+    const p = parseReceipt(
+      lines('TOTAL A PAGAR 160.000', '99.000 99.000', 'LIQUIDACION DEL (5%) (10%) T.IVA'),
+    );
+    expect(p.iva5).toBeNull();
+    expect(p.iva10).toBeNull();
+    expect(p.missing).toContain('IVA');
+  });
+
+  it('takes a total printed above its label when the footer confirms it', () => {
+    const p = parseReceipt(
+      lines('160.000', 'TOTAL A PAGAR', '0 14.545 14.545', 'LIQUIDACIÓN DEL I.V.A.: (5%) (10%) T.IVA:'),
+    );
+    expect(p.total).toBe(160_000);
+    expect(p.totalsAgree).toBe(true);
+  });
+
+  it('does not take a total from above when nothing confirms it', () => {
+    expect(parseReceipt(lines('99.999', 'TOTAL A PAGAR')).total).toBeNull();
+  });
+});
+
+describe('an invoice in a foreign currency', () => {
+  it('is recognised on a KuDE by its Moneda line', () => {
+    const p = parseReceipt(lines('KuDE de Factura Electrónica', 'Moneda: Dólar americano', 'Total: 1.538,00'));
+    expect(p.foreignCurrency).toBe('USD');
+  });
+
+  it('is recognised by U$S or USD beside its amounts', () => {
+    expect(parseReceipt('TOTAL U$S 1.538,00').foreignCurrency).toBe('USD');
+    expect(parseReceipt('Total USD: 448,00').foreignCurrency).toBe('USD');
+  });
+
+  it('is not claimed for an invoice in guaraníes', () => {
+    const p = parseReceipt(lines('KuDE de Factura Electrónica', 'Moneda: Guarani', 'Total: 48.000'));
+    expect(p.foreignCurrency).toBeNull();
+    expect(parseReceipt(RECEIPT_B_TEXT).foreignCurrency).toBeNull();
+  });
+});

@@ -130,3 +130,28 @@ describe('MINAS281 MERCADO — right before, and still right', () => {
     });
   }
 });
+
+describe('Baratão talonario — refused for "no IVA"', () => {
+  const { parsed: p } = read('baratao-talonario');
+
+  it('reads the total printed above its label', () => expect(p.total).toBe(160_000));
+
+  it('reads the IVA printed above its labels, placed by arithmetic', () => {
+    expect(p.iva10).toBe(14_545);
+    expect(p.iva5).toBe(0);
+    expect(p.totalIva).toBe(14_545);
+  });
+
+  it('agrees with itself and reports nothing missing', () => {
+    expect(p.totalsAgree).toBe(true);
+    expect(p.missing).toEqual([]);
+  });
+
+  it('reads the issuer, the timbrado and the written date', () => {
+    expect(p.emisorRuc).toBe('6700626');
+    expect(p.timbrado).toBe('18757069');
+    expect(iso(p.fechaEmision)).toBe('2026-09-16');
+    expect(p.emisorNombre).not.toMatch(/RUC/);
+    expect(p.foreignCurrency).toBeNull();
+  });
+});

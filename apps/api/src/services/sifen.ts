@@ -52,7 +52,10 @@ export interface ParsedDte {
 const parser = new XMLParser({
   ignoreAttributes: false,
   attributeNamePrefix: '@_',
-  parseTagValue: true, // coerce numeric tag values
+  // Every value stays text. num() converts what is a number; coercing here
+  // turned a referenced 44-digit CDC into 1.8e+42 and an item code such as
+  // 0000000010122 into 10122 (seen on a real remisión, 2026-09-19).
+  parseTagValue: false,
   parseAttributeValue: false, // keep attributes (CDC) as strings (preserve leading zeros)
   trimValues: true,
 });

@@ -24,6 +24,7 @@ const PAPER: Record<VisionFixture, Fiscal> = {
   'minas281-ticket-retake': MINAS,
   'fox-kude': { total: 48_000, gravada5: 0, iva5: 0, gravada10: 48_000, iva10: 4_364 },
   'primavera-ticket': { total: 223_150, gravada5: 76_590, iva5: 3_647, gravada10: 146_589, iva10: 13_326 },
+  'baratao-talonario': { total: 160_000, gravada5: 0, iva5: 0, gravada10: 160_000, iva10: 14_545 },
 };
 
 /** A gravada derived from its IVA carries the IVA's rounding: up to ~11 Gs. */

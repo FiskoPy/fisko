@@ -364,6 +364,17 @@ export async function importPhoto(userId: string, imageBase64: string) {
     );
   }
 
+  if (parsed.foreignCurrency) {
+    // A dollar invoice adds up in dollars, so the checks below would pass it,
+    // and it was stored as guaraníes (2026-09-19). Its XML carries the
+    // currency and the exchange rate; a photo cannot.
+    throw AppError.badRequest(
+      `Esta factura está en ${parsed.foreignCurrency === 'USD' ? 'dólares' : 'moneda extranjera'}, ` +
+        'y la foto sólo lee guaraníes. Cargala con su XML, o dejá que llegue por correo: ' +
+        'así se registra con su tipo de cambio.',
+    );
+  }
+
   if (parsed.total == null) {
     // Three real photos failed here on 2026-09-13 and the only record was
     // "400", so the layout that defeated the parser was unrecoverable. Log the

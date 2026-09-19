@@ -19,12 +19,15 @@ import type { VisionAnnotation } from '../../src/services/vision-layout';
  *  - fox-kude: a KuDE. Production read another photo of it as Gs 8.000 with no
  *    IVA; in this one Vision spelled the total label "Tolal".
  *  - minas281-ticket, minas281-ticket-retake: the one that came out right.
+ *  - baratao-talonario: a pre-printed form (scanned, 2026-09-17) whose amounts
+ *    sit above their labels; refused for "no IVA" on 2026-09-19.
  */
 export type VisionFixture =
   | 'primavera-ticket'
   | 'fox-kude'
   | 'minas281-ticket'
-  | 'minas281-ticket-retake';
+  | 'minas281-ticket-retake'
+  | 'baratao-talonario';
 
 export function visionFixture(name: VisionFixture): VisionAnnotation {
   return JSON.parse(readFileSync(join(__dirname, 'vision', `${name}.json`), 'utf8')) as VisionAnnotation;

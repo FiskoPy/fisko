@@ -240,3 +240,27 @@ describe('an XML beside the photo of a different invoice with the same number', 
     expect(await stored()).toHaveLength(2);
   });
 });
+
+describe('a photo of an invoice in dollars', () => {
+  beforeAll(newUser);
+
+  it('is refused and pointed at its XML, never stored as guaraníes', async () => {
+    // Stored as Gs 1.538 on 2026-09-19: in dollars its arithmetic holds.
+    photoReads(
+      lines(
+        'KuDE de Factura Electrónica',
+        'AGROQUIMICA EJEMPLO S.A.',
+        'RUC: 80054993-7',
+        'Moneda: Dólar americano',
+        'Fecha de emisión: 18/08/2026',
+        'Total Pago. 1.538,00',
+        'Gravadas 10%: 1.538,00',
+        'IVA 10%: 139,82',
+      ),
+    );
+    const res = await postPhoto();
+    expect(res.status).toBe(400);
+    expect(res.body.error.message).toMatch(/dólares/);
+    expect(await stored()).toEqual([]);
+  });
+});
