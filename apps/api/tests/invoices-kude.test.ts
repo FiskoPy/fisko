@@ -10,6 +10,7 @@ vi.mock('../src/services/ocr', () => ({
 
 import { createApp } from '../src/app';
 import { prisma } from '../src/lib/prisma';
+import { importXml } from '../src/modules/invoices/invoices.service';
 import { extractText } from '../src/services/ocr';
 import { DTE_XML, REAL_CDC } from './fixtures/dte';
 
@@ -114,6 +115,26 @@ describe('a photographed KuDE, then the XML of the same invoice', () => {
     photoReads(KUDE);
     expect((await postPhoto()).status).toBe(409);
     expect(await stored()).toEqual([{ cdc: REAL_CDC, source: 'manual' }]);
+  });
+});
+
+describe('the same XML by mailbox, then by hand', () => {
+  beforeAll(newUser);
+
+  it('takes it once from the mailbox', async () => {
+    const invoice = await importXml(userId, DTE_XML, 'email');
+    expect(invoice.cdc).toBe(REAL_CDC);
+    expect(invoice.source).toBe('email');
+  });
+
+  it('turns away the same XML imported by hand — the CDC is the same invoice', async () => {
+    // The client asked what happens when a supplier's XML arrives by email and
+    // he also loads it himself (2026-09-20). Counting it twice would double
+    // its IVA crédito.
+    const res = await postXml();
+    expect(res.status).toBe(409);
+    expect(res.body.error.message).toMatch(/ya fue importada/i);
+    expect(await stored()).toEqual([{ cdc: REAL_CDC, source: 'email' }]);
   });
 });
 
