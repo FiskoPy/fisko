@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -498,6 +501,47 @@ describe('reading the text for what it shows', () => {
     expect(dateSeen('TIMBRADO: 18479784 FECHA: 02/09/2026', day(2026, 9, 2))).toBe(true);
     expect(dateSeen('FABRICA DE PASTAS S.A.\nFECHA DE EMISIÓN: 02/09/2026', day(2026, 9, 2))).toBe(true);
     expect(dateSeen('AV. MCAL LOPEZ 1234\nFECHA DE EMISIÓN: 02/09/2026', day(2026, 9, 2))).toBe(true);
+  });
+
+  it('takes a handwritten date that Vision scattered below its label', () => {
+    // A talonario filled in by hand (Cevelio, 2026-09-20): "19 de." under the
+    // label, "Agosto" on the next row, and "de 20.26" far down the page. The
+    // model read 2026-08-19 right, and the witness dropped it.
+    const text = readFileSync(join(__dirname, 'fixtures', 'ocr-text', 'cevelio-manuscrita.txt'), 'utf8');
+    expect(dateSeen(text, new Date(Date.UTC(2026, 7, 19)))).toBe(true);
+    // Not another day, not another month — and not the vigencia beside it.
+    expect(dateSeen(text, new Date(Date.UTC(2026, 7, 18)))).toBe(false);
+    expect(dateSeen(text, new Date(Date.UTC(2026, 8, 19)))).toBe(false);
+    expect(dateSeen(text, new Date(Date.UTC(2026, 5, 8)))).toBe(false);
+    expect(dateSeen(text, new Date(Date.UTC(2026, 8, 30)))).toBe(false);
+  });
+
+  it('stores that handwritten talonario from the model, with the date it bears', () => {
+    const text = readFileSync(join(__dirname, 'fixtures', 'ocr-text', 'cevelio-manuscrita.txt'), 'utf8');
+    const ai = fromExtraction({
+      ...aiFixture('minas281'),
+      emisorNombre: 'CEVELIO SERVICIO GENERALES Y METALURGICA',
+      emisorRuc: '6902656',
+      emisorDv: 4,
+      receptorNombre: 'Tec Bio Solution',
+      receptorRuc: '80175384',
+      timbrado: '18908353',
+      numeroDoc: '001-001-0000071',
+      fecha: '2026-08-19',
+      total: 900_000,
+      gravada5: null,
+      gravada10: 900_000,
+      exentas: null,
+      iva5: null,
+      iva10: 81_818,
+      totalIva: 81_818,
+      redondeo: null,
+      items: [{ descripcion: 'Fabricacion de puerta', cantidad: 1, precioUnitario: 900_000, total: 900_000, tasaIva: 10 }],
+    });
+    const decision = decidePhoto(parseReceipt(text), ai, text, '80175384');
+    expect(decision).toMatchObject({ kind: 'store', source: 'ai' });
+    expect(decision.reading).toMatchObject({ total: 900_000, iva10: 81_818, emisorRuc: '6902656' });
+    expect(decision.reading?.fechaEmision?.toISOString().slice(0, 10)).toBe('2026-08-19');
   });
 
   it('reads a date however it is printed', () => {

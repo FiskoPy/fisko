@@ -216,6 +216,30 @@ export function dateSeen(text: string, date: Date): boolean {
   // Lines that call this date something else are out from the start, and so is
   // anything standing in the block the buyer signs and dates: a credit invoice
   // has him write there the day he received the goods, in another month.
+  // Handwritten on a talonario's blanks, which Vision scatters: "Fecha de
+  // Emisión: 19 de." then "Agosto" on the next line, and the year's "26",
+  // written after the printed "20", rows further down as "de 20.26". The day
+  // and month have to sit right under the emission label — that is what ties
+  // them to the emission and not to a due date — and the year may be anywhere,
+  // whole or split. (Cevelio, 2026-09-20: read right by the model, lost here.)
+  const labelled = lines
+    .map((line, i) => ({ line, i }))
+    .filter(({ line }) => EMISSION.test(line) && !RIVAL.test(line) && !FOOT.test(line));
+  const monthName = `${MONTHS[m - 1]}[a-z]*`;
+  const dayMonth = new RegExp(`(?<!\\d)0?${d}\\s*(?:de\\s*)?\\.?\\s*(?:de\\s*)?${monthName}`);
+  const yearAnywhere = new RegExp(
+    `(?<!\\d)(?:${y}|${String(y).slice(0, 2)}\\s*[.\\s]\\s*${String(y).slice(2)})(?!\\d)`,
+  );
+  if (
+    yearAnywhere.test(lines.join('\n')) &&
+    labelled.some(({ i }) => {
+      const below = lines.slice(i, i + 3).filter((l, k) => k === 0 || !RIVAL.test(l));
+      return dayMonth.test(below.join(' '));
+    })
+  ) {
+    return true;
+  }
+
   const own = at.filter((i) => !RIVAL.test(lines[i] as string) && !FOOT.test(near(i)));
   if (!own.length) return false;
 
@@ -326,7 +350,11 @@ export function witnessed(
     // the wrong way round — turn it back if it says who the seller is, and
     // otherwise leave the issuer unread rather than file a purchase as a sale,
     // which moves its IVA from credit to debit.
-    const buyers = [ownRuc, ocr?.receptorRuc].filter(Boolean);
+    // The user's own RUC, when known, is the buyer and nothing else is: the
+    // parser's receptor is a guess, and on a page it could not read it took
+    // the seller's RUC for the buyer's and undid a correct issuer (Cevelio,
+    // 2026-09-20). It only stands in when the profile has no RUC.
+    const buyers = (ownRuc ? [ownRuc] : [ocr?.receptorRuc]).filter(Boolean);
     if (r.emisorRuc && buyers.includes(r.emisorRuc)) {
       const seller = r.receptorRuc && !buyers.includes(r.receptorRuc) ? r.receptorRuc : null;
       [r.emisorNombre, r.receptorNombre] = [r.receptorNombre, r.emisorNombre];
