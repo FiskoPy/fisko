@@ -9,7 +9,13 @@
  * check their internet. That shipped to the client once. The defines are not
  * documentation to be remembered any more; they live here.
  *
- * Usage:  node scripts/build-apk.js [--api <url>] [--client-id <id>]
+ * Usage:  node scripts/build-apk.js [--api <url>] [--client-id <id>] [--split]
+ *
+ * --split builds per ABI as well, and hands back the arm64 one: ~19 MB
+ * instead of ~54, which is what fits through a chat upload. It is the same
+ * app with only one architecture's code in it, and it goes through the same
+ * verification — an arm64 APK built by hand, without the defines, is how the
+ * emulator URL reached the client a second time (2026-09-19).
  */
 const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
@@ -61,6 +67,7 @@ function flutterBin() {
 
 const api = arg('api', DEFAULTS.api);
 const clientId = arg('client-id', DEFAULTS.clientId);
+const split = process.argv.includes('--split');
 const mobile = path.join(__dirname, '..', 'apps', 'mobile');
 
 if (isLocalApiBaseUrl(api)) {
@@ -84,6 +91,7 @@ execFileSync(
     'build',
     'apk',
     '--release',
+    ...(split ? ['--split-per-abi'] : []),
     '--dart-define=API_BASE_URL=' + api,
     '--dart-define=GOOGLE_OAUTH_CLIENT_ID=' + clientId,
   ],
@@ -95,7 +103,14 @@ execFileSync(
 
 // Passing the flags is not proof the value landed. Read it back out of the
 // compiled artifact — that is the check that would have caught this.
-const apk = path.join(mobile, 'build', 'app', 'outputs', 'flutter-apk', 'app-release.apk');
+const apk = path.join(
+  mobile,
+  'build',
+  'app',
+  'outputs',
+  'flutter-apk',
+  split ? 'app-arm64-v8a-release.apk' : 'app-release.apk',
+);
 const host = new URL(api).host;
 let verified = false;
 try {
@@ -122,7 +137,11 @@ try {
 const pubspec = fs.readFileSync(path.join(mobile, 'pubspec.yaml'), 'utf8');
 const m = pubspec.match(/^version:\s*(.+)$/m);
 const version = (m ? m[1] : '0.0.0').trim().split('+')[0];
-const out = path.join(os.homedir(), 'Downloads', 'Fisko-' + version + '.apk');
+const out = path.join(
+  os.homedir(),
+  'Downloads',
+  'Fisko-' + version + (split ? '-arm64' : '') + '.apk',
+);
 fs.copyFileSync(apk, out);
 
 console.log('\nOK  ' + out);
