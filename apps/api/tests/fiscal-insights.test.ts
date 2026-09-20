@@ -12,12 +12,15 @@ const emptySummary = (over: Partial<FiscalSummary> = {}): FiscalSummary => ({
   iva10: 0,
   baseGrav5: 0,
   baseGrav10: 0,
+  exentas: 0,
   ventas: 0,
   compras: 0,
   ivaCredito: 0,
   ivaDebito: 0,
   irpEstimado: 0,
   sinConversion: 0,
+  documentos: 0,
+  sinOperacion: 0,
   byMonth: [],
   byCategory: [],
   ...over,
@@ -84,10 +87,39 @@ describe('buildInsights — accumulated IVA', () => {
     expect(kinds(out)).not.toContain('iva_acumulado');
   });
 
-  it('never states an exact due date, since it depends on the RUC digit', () => {
-    const out = buildInsights(input({ summary: emptySummary({ totalIva: 900_000 }) }));
+  it('states the exact day the RUC files on (DNIT perpetual calendar)', () => {
+    // A RUC ending in 4 files on the 15th. NOW is 20/08/2026, so the IVA of
+    // August is presented on 15/09/2026, a Tuesday.
+    const out = buildInsights(
+      input({ ruc: '80175384', summary: emptySummary({ totalIva: 900_000 }) }),
+    );
     const iva = out.find((i) => i.kind === 'iva_acumulado')!;
-    expect(iva.body).toMatch(/último dígito de tu RUC/);
+    expect(iva.body).toContain('15 de setiembre');
+    expect(iva.body).not.toMatch(/alrededor/);
+  });
+
+  it('moves a due date off the weekend, and asks for the RUC when it has none', () => {
+    // A RUC ending in 0 files on the 7th; 07/02/2027 is a Sunday -> the 8th.
+    const out = buildInsights(
+      input({
+        ruc: '80000000',
+        now: new Date('2027-01-20T12:00:00Z'),
+        summary: emptySummary({ totalIva: 900_000 }),
+      }),
+    );
+    expect(out.find((i) => i.kind === 'iva_acumulado')!.body).toContain('8 de febrero');
+
+    const sinRuc = buildInsights(input({ summary: emptySummary({ totalIva: 900_000 }) }));
+    expect(sinRuc.find((i) => i.kind === 'iva_acumulado')!.body).toMatch(/Cargá tu RUC/);
+  });
+
+  it('calls a credit balance what it is: nothing to pay, carried forward', () => {
+    const out = buildInsights(
+      input({ summary: emptySummary({ totalIva: 900_000, ivaDebito: 0, ivaCredito: 3_244_443 }) }),
+    );
+    const iva = out.find((i) => i.kind === 'iva_acumulado')!;
+    expect(iva.body).toMatch(/No hay IVA a pagar/);
+    expect(iva.body).toContain('3.244.443');
   });
 });
 
@@ -115,6 +147,16 @@ describe('buildInsights — encouragement', () => {
   it('only celebrates a real streak', () => {
     expect(kinds(buildInsights(input({ recentCount: 4 })))).not.toContain('aliento');
     expect(kinds(buildInsights(input({ recentCount: 5 })))).toContain('aliento');
+  });
+
+  it('does not claim the filing is up to date, only that the documents are in', () => {
+    const out = buildInsights(input({ recentCount: 4, recentDocs: 5 }));
+    const card = out.find((i) => i.kind === 'aliento')!;
+    expect(card.title).not.toMatch(/al día/i);
+    // 4 facturas computables and 1 nota de remisión, said apart.
+    expect(card.body).toContain('5 documento(s)');
+    expect(card.body).toContain('4 computables');
+    expect(card.body).toMatch(/Importar no es declarar/);
   });
 });
 

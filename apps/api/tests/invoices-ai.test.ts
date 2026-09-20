@@ -122,11 +122,24 @@ describe('a dollar invoice', () => {
       tipoCambio: 6_027.92,
       total: 1_538,
       iva10: 139.82,
-      baseGrav10: 1_398.2,
+      // 1.398,18 + 139,82 = 1.538,00 exactly. The IVA is printed on the paper
+      // and stands; the base, worked out from it, carries the rounding — at
+      // 1.398,20 the parts came to 1.538,02 and the month's report stood
+      // 120 Gs above the sum of its own invoices (2026-09-20).
+      baseGrav10: 1_398.18,
       emisorRuc: '80156877',
       emisorNombre: 'RR TOP AGRO E.A.S.',
       fecha: '2026-08-18',
     });
+    // What the declaration is read by: base + IVA + exentas = total, exactly.
+    const parts =
+      Number(invoice.baseGrav5) +
+      Number(invoice.iva5) +
+      Number(invoice.baseGrav10) +
+      Number(invoice.iva10) +
+      Number(invoice.exentas);
+    expect(parts).toBe(Number(invoice.totalOpe));
+
     expect(invoice.items).toHaveLength(3);
     const first = invoice.items.find((i) => i.descripcion.startsWith('ACRUX'));
     expect({

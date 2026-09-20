@@ -33,8 +33,12 @@ export interface InsightInput {
   summary: FiscalSummary;
   /** When the newest invoice entered Fisko (createdAt), or null when none. */
   lastInvoiceAt: Date | null;
-  /** Invoices imported in the last 10 days. */
+  /** The taxpayer's RUC, without its check digit: it sets the due date. */
+  ruc?: string | null;
+  /** Invoices imported in the last 10 days that carry an operation. */
   recentCount: number;
+  /** Everything imported in those days, notas de remisión included. */
+  recentDocs?: number;
   /** Total operations in the last 10 days, in guaraníes. */
   recentTotal: number;
   /** "Now", passed in so the rules stay pure and testable. */
@@ -48,16 +52,45 @@ const daysBetween = (a: Date, b: Date): number =>
   Math.floor((a.getTime() - b.getTime()) / 86_400_000);
 
 /**
- * DNIT files IVA monthly; the due date depends on the last digit of the RUC,
- * spread across the second week of the following month. Without the taxpayer's
- * calendar we use day 12 as a conservative middle, and say so in the copy.
+ * DNIT's perpetual calendar (RG 01/2007, kept by RG 38/2020): the day the
+ * monthly IVA falls due, by the last digit of the RUC — the taxpayer's own
+ * number, never its check digit.
+ *
+ * Saying "alrededor del 12" was no use to anyone: the client has to know the
+ * day he files. A due date landing on a Saturday or a Sunday moves to the next
+ * working day; a national holiday moves it too, which we cannot know here, so
+ * the copy says so rather than pretending.
  */
-const IVA_DUE_DAY = 12;
+const DUE_DAY_BY_LAST_DIGIT = [7, 9, 11, 13, 15, 17, 19, 21, 23, 25];
 
-function nextDueDate(now: Date): Date {
-  const due = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, IVA_DUE_DAY));
+const MONTHS_ES = [
+  'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+  'julio', 'agosto', 'setiembre', 'octubre', 'noviembre', 'diciembre',
+];
+
+/** The day this RUC files on, or null when we do not know the RUC. */
+export function ivaDueDay(ruc: string | null | undefined): number | null {
+  const digits = (ruc ?? '').replace(/\D/g, '');
+  if (!digits) return null;
+  return DUE_DAY_BY_LAST_DIGIT[Number(digits[digits.length - 1])] ?? null;
+}
+
+/**
+ * When the IVA of the month that [now] falls in has to be filed: the calendar
+ * day of the following month, moved off a weekend.
+ */
+export function ivaDueDate(ruc: string | null | undefined, now: Date): Date | null {
+  const day = ivaDueDay(ruc);
+  if (day == null) return null;
+  let due = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, day));
+  while (due.getUTCDay() === 0 || due.getUTCDay() === 6) {
+    due = new Date(due.getTime() + 86_400_000);
+  }
   return due;
 }
+
+const fmtDate = (d: Date): string =>
+  `${d.getUTCDate()} de ${MONTHS_ES[d.getUTCMonth()]}`;
 
 /** Threshold above which an accumulated IVA balance is worth flagging. */
 const IVA_ALERT_THRESHOLD = 500_000;
@@ -66,7 +99,8 @@ const IVA_ALERT_THRESHOLD = 500_000;
 const STALE_CAPTURE_DAYS = 10;
 
 export function buildInsights(input: InsightInput): Insight[] {
-  const { summary: s, lastInvoiceAt, recentCount, recentTotal, now } = input;
+  const { summary: s, lastInvoiceAt, recentCount, recentTotal, now, ruc } = input;
+  const recentDocs = input.recentDocs ?? recentCount;
   const out: Insight[] = [];
 
   // 1. What came in lately. This counts invoices by the day they were LOADED,
@@ -86,11 +120,18 @@ export function buildInsights(input: InsightInput): Insight[] {
     });
   }
 
-  // 2. Accumulated IVA and when it falls due.
+  // 2. Accumulated IVA and when it falls due. Débito over crédito is what is
+  // paid; crédito over débito is not a payment at all — it carries to the next
+  // period, and calling it anything else worries a client who owes nothing.
   const saldo = s.ivaDebito - s.ivaCredito;
   if (s.totalIva >= IVA_ALERT_THRESHOLD) {
-    const due = nextDueDate(now);
-    const dias = daysBetween(due, now);
+    const due = ivaDueDate(ruc, now);
+    const dias = due ? daysBetween(due, now) : 0;
+    const cuando = due
+      ? `El IVA de ${MONTHS_ES[now.getUTCMonth()]} se presenta el ${fmtDate(due)}` +
+        (dias > 0 ? ` (en ${dias} días)` : '') +
+        ', por el último dígito de tu RUC; si cae feriado, pasa al siguiente día hábil.'
+      : 'Cargá tu RUC en el perfil y te decimos el día exacto en que se presenta.';
     out.push({
       kind: 'iva_acumulado',
       level: saldo > 0 ? 'warning' : 'info',
@@ -100,9 +141,10 @@ export function buildInsights(input: InsightInput): Insight[] {
           : `Tenés ${fmtGs(Math.abs(saldo))} de IVA a favor`,
       body:
         `IVA débito ${fmtGs(s.ivaDebito)} · IVA crédito ${fmtGs(s.ivaCredito)}. ` +
-        `El vencimiento cae alrededor del ${IVA_DUE_DAY} del mes que viene` +
-        (dias > 0 ? ` (en ~${dias} días)` : '') +
-        `; la fecha exacta depende del último dígito de tu RUC.`,
+        (saldo > 0
+          ? `A pagar ${fmtGs(saldo)}. `
+          : `No hay IVA a pagar: ${fmtGs(Math.abs(saldo))} quedan a favor para el período siguiente. `) +
+        cuando,
       action: { label: 'Ver reportes', route: '/relatorios' },
     });
   }
@@ -133,13 +175,21 @@ export function buildInsights(input: InsightInput): Insight[] {
     }
   }
 
-  // 4. Encouragement — only when there is something real to celebrate.
-  if (recentCount >= 5) {
+  // 4. Documents are in — which is not the same as a declaration being filed,
+  // and "Vas al día" read as if it were.
+  if (recentDocs >= 5) {
+    const noComputables = recentDocs - recentCount;
     out.push({
       kind: 'aliento',
       level: 'success',
-      title: 'Vas al día 👌',
-      body: `Importaste ${recentCount} comprobantes en 10 días. Así el cierre del mes no te agarra corriendo.`,
+      title: 'Documentación importada',
+      body:
+        `${recentDocs} documento(s) en 10 días` +
+        (noComputables > 0
+          ? `: ${recentCount} computables y ${noComputables} sin IVA (notas de remisión). `
+          : '. ') +
+        'Con esto cargado, el cierre del mes no te agarra corriendo. ' +
+        'Importar no es declarar: la presentación la hacés en Marangatu.',
     });
   }
 

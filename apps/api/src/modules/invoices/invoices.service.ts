@@ -53,6 +53,7 @@ export interface PublicInvoice {
   iva10: number;
   baseGrav5: number;
   baseGrav10: number;
+  exentas: number;
   originalCdc: string | null;
   source: string;
   createdAt: Date;
@@ -96,6 +97,7 @@ export function toPublicInvoice(inv: Invoice & { items?: InvoiceItem[] }): Publi
     iva10: n(inv.iva10),
     baseGrav5: n(inv.baseGrav5),
     baseGrav10: n(inv.baseGrav10),
+    exentas: n(inv.exentas),
     originalCdc: inv.originalCdc,
     source: inv.source,
     createdAt: inv.createdAt,
@@ -255,6 +257,7 @@ export async function importXml(
       iva10: dte.iva10,
       baseGrav5: dte.baseGrav5,
       baseGrav10: dte.baseGrav10,
+      exentas: dte.exentas,
       originalCdc: dte.originalCdc,
       source,
       xmlRaw: xml.length <= 200_000 ? xml : null,
@@ -414,6 +417,25 @@ export async function importPhoto(userId: string, imageBase64: string) {
   const iva10 = round(parsed.iva10 ?? 0);
   const iva5 = round(parsed.iva5 ?? 0);
 
+  // base + IVA + exentas = total, exactly. The IVA figures are printed on the
+  // paper and stand; a base derived from one of them is an inference and
+  // carries its rounding — a gravada of 1.538,02 read off an IVA of 139,82
+  // against a printed total of 1.538,00 put the report 120 Gs above the sum of
+  // its own invoices (2026-09-20). The residual, which totalsAgree has already
+  // held to a rounding, goes back into the base it came from.
+  const base5 =
+    parsed.gravada5 != null ? Math.max(0, round(parsed.gravada5 - iva5)) : round(iva5 * 20);
+  let base10 =
+    parsed.gravada10 != null ? Math.max(0, round(parsed.gravada10 - iva10)) : round(iva10 * 10);
+  let exentas = round(parsed.exentas ?? 0);
+  const residual = round(total - (base5 + iva5 + base10 + iva10 + exentas));
+  if (residual !== 0) {
+    // Onto the taxed base when there is one — that is where the rounding was
+    // introduced — and onto the exempt amount when the invoice is untaxed.
+    if (base10 + iva10 > 0) base10 = Math.max(0, round(base10 + residual));
+    else if (base5 + iva5 <= 0) exentas = Math.max(0, round(exentas + residual));
+  }
+
   const invoice = await prisma.invoice.create({
     data: {
       userId,
@@ -441,10 +463,9 @@ export async function importPhoto(userId: string, imageBase64: string) {
       // which is base + IVA. Subtract when we read it; fall back to deriving
       // from the tax only when we did not. iva*10 and iva*20 are the correct
       // multipliers for the NET base (49.600*10 = 496.000 = 545.600 - 49.600).
-      baseGrav5:
-        parsed.gravada5 != null ? Math.max(0, round(parsed.gravada5 - iva5)) : round(iva5 * 20),
-      baseGrav10:
-        parsed.gravada10 != null ? Math.max(0, round(parsed.gravada10 - iva10)) : round(iva10 * 10),
+      baseGrav5: base5,
+      baseGrav10: base10,
+      exentas,
       // Line items, when the vision model listed them and they add up to the
       // amounts stored (see itemsFitting).
       items: {

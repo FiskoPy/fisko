@@ -45,6 +45,8 @@ export interface ParsedDte {
   iva10: number;
   baseGrav5: number;
   baseGrav10: number;
+  /** dSubExe + dSubExo: what the invoice sells without IVA. */
+  exentas: number;
   originalCdc: string | null;
   items: ParsedDteItem[];
 }
@@ -162,6 +164,7 @@ export function parseDte(xml: string): ParsedDte {
     iva10: num(tot.dIVA10),
     baseGrav5: num(tot.dBaseGrav5),
     baseGrav10: num(tot.dBaseGrav10),
+    exentas: num(tot.dSubExe) + num(tot.dSubExo),
     originalCdc: str(deepFind(de, 'dCdCDERef')),
     items,
   };

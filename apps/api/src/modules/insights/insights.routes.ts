@@ -3,7 +3,7 @@ import { asyncHandler } from '../../utils/async-handler';
 import { requireAuth, type AuthedRequest } from '../../middleware/auth';
 import { AppError } from '../../errors/app-error';
 import { prisma } from '../../lib/prisma';
-import { getSummary } from '../reports/reports.service';
+import { documentSign, getSummary } from '../reports/reports.service';
 import { buildInsights } from '../../services/fiscal-insights';
 import { forecastIva } from '../../services/fiscal-forecast';
 
@@ -23,7 +23,7 @@ insightsRouter.get(
     const now = new Date();
     const since = new Date(now.getTime() - RECENT_WINDOW_DAYS * 86_400_000);
 
-    const [summary, latest, recent] = await Promise.all([
+    const [summary, latest, recent, owner] = await Promise.all([
       getSummary(user.sub, {}),
       // When the newest invoice ENTERED Fisko, not its emission date: the nudge
       // says "hace N días que no entra una factura", and a February invoice
@@ -35,17 +35,21 @@ insightsRouter.get(
       }),
       prisma.invoice.findMany({
         where: { userId: user.sub, createdAt: { gte: since } },
-        select: { totalOpe: true, moneda: true, tipoCambio: true },
+        select: { totalOpe: true, moneda: true, tipoCambio: true, tipoDoc: true },
       }),
+      // The RUC sets the day the IVA is filed (DNIT's perpetual calendar).
+      prisma.user.findUnique({ where: { id: user.sub }, select: { ruc: true } }),
     ]);
 
     // Same currency rule as the summary: convert with the invoice's own rate,
     // and leave out anything we cannot convert rather than adding USD to PYG.
+    // A nota de remisión carries no operation of its own, so it is counted as
+    // a document but never as a comprobante that moves a total.
     let recentTotal = 0;
     let recentCount = 0;
     for (const r of recent) {
       const rate = r.moneda === 'PYG' ? 1 : Number(r.tipoCambio ?? 0);
-      if (!rate) continue;
+      if (!rate || documentSign(r.tipoDoc) === 0) continue;
       recentTotal += Number(r.totalOpe) * rate;
       recentCount += 1;
     }
@@ -53,7 +57,9 @@ insightsRouter.get(
     const insights = buildInsights({
       summary,
       lastInvoiceAt: latest?.createdAt ?? null,
+      ruc: owner?.ruc ?? null,
       recentCount,
+      recentDocs: recent.length,
       recentTotal,
       now,
     });

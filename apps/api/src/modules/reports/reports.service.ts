@@ -33,6 +33,8 @@ export interface FiscalSummary {
   iva10: number;
   baseGrav5: number;
   baseGrav10: number;
+  /** What was sold without IVA (dSubExe + dSubExo). */
+  exentas: number;
   ventas: number; // facturas donde el usuario es emisor (ingresos)
   compras: number; // facturas donde el usuario es receptor (gastos)
   ivaCredito: number; // IVA de compras
@@ -41,6 +43,12 @@ export interface FiscalSummary {
   /// Invoices left OUT of the totals: a foreign currency with no usable rate.
   /// Silently adding those to the guaraní totals produced a wrong tax figure.
   sinConversion: number;
+  /// Everything imported in the period, including what carries no operation of
+  /// its own. "5 comprobantes" for 4 facturas and a nota de remisión read as
+  /// five invoices; they are counted apart now.
+  documentos: number;
+  /// Documents that carry no operation: notas de remisión, retenciones.
+  sinOperacion: number;
   byMonth: MonthBucket[];
   byCategory: CategoryBucket[];
 }
@@ -56,6 +64,7 @@ type Row = {
   iva10: unknown;
   baseGrav5: unknown;
   baseGrav10: unknown;
+  exentas: unknown;
   emisorRuc: string;
   emisorNombre: string;
   moneda: string;
@@ -100,6 +109,7 @@ export async function getSummary(userId: string, period: ReportPeriod): Promise<
       iva10: true,
       baseGrav5: true,
       baseGrav10: true,
+      exentas: true,
       emisorRuc: true,
       emisorNombre: true,
       moneda: true,
@@ -117,12 +127,14 @@ export async function getSummary(userId: string, period: ReportPeriod): Promise<
     iva10: 0,
     baseGrav5: 0,
     baseGrav10: 0,
+    exentas: 0,
     ventas: 0,
     compras: 0,
     ivaCredito: 0,
     ivaDebito: 0,
   };
   let sinConversion = 0;
+  let sinOperacion = 0;
   const months = new Map<string, MonthBucket>();
   const cats = new Map<CategoryKey, CategoryBucket>();
 
@@ -138,7 +150,10 @@ export async function getSummary(userId: string, period: ReportPeriod): Promise<
     // A credit note reverses an operation; it used to be added like an invoice,
     // so a refund INCREASED compras and IVA crédito.
     const sign = documentSign(r.tipoDoc);
-    if (sign === 0) continue;
+    if (sign === 0) {
+      sinOperacion += 1;
+      continue;
+    }
     const k = rate * sign;
     const totalOpe = num(r.totalOpe) * k;
     const totalIva = num(r.totalIva) * k;
@@ -148,6 +163,7 @@ export async function getSummary(userId: string, period: ReportPeriod): Promise<
     sum.iva10 += num(r.iva10) * k;
     sum.baseGrav5 += num(r.baseGrav5) * k;
     sum.baseGrav10 += num(r.baseGrav10) * k;
+    sum.exentas += num(r.exentas) * k;
 
     const isVenta = userRuc != null && normalizeRuc(r.emisorRuc) === userRuc;
     if (isVenta) {
@@ -190,8 +206,10 @@ export async function getSummary(userId: string, period: ReportPeriod): Promise<
       from: period.from ? period.from.toISOString() : null,
       to: period.to ? period.to.toISOString() : null,
     },
-    count: rows.length - sinConversion,
+    count: rows.length - sinConversion - sinOperacion,
     sinConversion,
+    documentos: rows.length,
+    sinOperacion,
     ...sum,
     irpEstimado,
     byMonth: [...months.values()].sort((a, b) => a.month.localeCompare(b.month)),
