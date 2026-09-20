@@ -8,6 +8,8 @@ import 'package:image_picker/image_picker.dart';
 
 import '../../../core/config/constants.dart';
 import '../../../core/errors/error_message.dart';
+import '../../reports/application/summary_controller.dart';
+import '../../reports/data/models/summary_models.dart';
 import '../application/invoices_controller.dart';
 import '../data/invoices_api.dart';
 import '../data/models/invoice_models.dart';
@@ -154,24 +156,150 @@ class CapturaPage extends ConsumerWidget {
             : const Icon(Icons.upload_file),
         label: const Text('Importar XML'),
       ),
-      body: RefreshIndicator(
-        onRefresh: () => ref.read(invoicesControllerProvider.notifier).load(),
-        child: state.isLoading && state.invoices.isEmpty
-            ? const Center(child: CircularProgressIndicator())
-            : state.invoices.isEmpty
-                ? _EmptyState()
-                : ListView.separated(
-                    padding: const EdgeInsets.only(bottom: 88, top: 8),
-                    itemCount: state.invoices.length,
-                    separatorBuilder: (_, __) => const Divider(height: 1),
-                    itemBuilder: (_, i) => _InvoiceTile(invoice: state.invoices[i]),
-                  ),
+      body: Column(
+        children: [
+          _MonthBar(selected: state.period),
+          Expanded(
+            child: RefreshIndicator(
+              onRefresh: () => ref.read(invoicesControllerProvider.notifier).load(),
+              child: state.isLoading && state.invoices.isEmpty
+                  ? const Center(child: CircularProgressIndicator())
+                  : state.invoices.isEmpty
+                      ? _EmptyState(period: state.period)
+                      : ListView.separated(
+                          padding: const EdgeInsets.only(bottom: 88),
+                          itemCount: state.invoices.length + 1,
+                          separatorBuilder: (_, __) => const Divider(height: 1),
+                          itemBuilder: (_, i) => i == 0
+                              ? _PeriodTotals(period: state.period)
+                              : _InvoiceTile(invoice: state.invoices[i - 1]),
+                        ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The month being shown. A closing is by month — the list used to mix August
+/// and September, and the client could not tell what he still owed for August.
+class _MonthBar extends ConsumerWidget {
+  const _MonthBar({required this.selected});
+
+  final DateTime? selected;
+
+  /// Every month with invoices (from the summary), plus the current one.
+  List<DateTime> _months(FiscalSummary? summary) {
+    final now = DateTime.now();
+    final out = <DateTime>{DateTime.utc(now.year, now.month)};
+    for (final b in summary?.byMonth ?? const <MonthBucket>[]) {
+      final parts = b.month.split('-');
+      if (parts.length >= 2) {
+        final y = int.tryParse(parts[0]);
+        final m = int.tryParse(parts[1]);
+        if (y != null && m != null) out.add(DateTime.utc(y, m));
+      }
+    }
+    final list = out.toList()..sort((a, b) => b.compareTo(a));
+    return list;
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final summary = ref.watch(fiscalSummaryProvider).valueOrNull;
+    final months = _months(summary);
+
+    return SizedBox(
+      height: 56,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        children: [
+          for (final m in months)
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: ChoiceChip(
+                label: Text(formatMonth(m)),
+                selected: selected != null && selected!.year == m.year && selected!.month == m.month,
+                onSelected: (_) => ref.read(invoicesControllerProvider.notifier).setPeriod(m),
+              ),
+            ),
+          ChoiceChip(
+            label: const Text('Todos'),
+            selected: selected == null,
+            onSelected: (_) => ref.read(invoicesControllerProvider.notifier).setPeriod(null),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// What the selected month adds up to, in guaraníes — the figure the month is
+/// closed with. Server-side totals: a foreign invoice is converted with the
+/// rate printed on it, and one without a rate is left out and said so.
+class _PeriodTotals extends ConsumerWidget {
+  const _PeriodTotals({required this.period});
+
+  final DateTime? period;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final summary = ref.watch(fiscalSummaryProvider).valueOrNull;
+    if (summary == null) return const SizedBox.shrink();
+
+    final key = period == null
+        ? null
+        : '${period!.year.toString().padLeft(4, '0')}-${period!.month.toString().padLeft(2, '0')}';
+    MonthBucket? bucket;
+    if (key != null) {
+      for (final b in summary.byMonth) {
+        if (b.month == key) bucket = b;
+      }
+    }
+    final count = bucket?.count ?? (key == null ? summary.count : 0);
+    final total = bucket?.total ?? (key == null ? summary.totalOpe : 0);
+    final iva = bucket?.iva ?? (key == null ? summary.totalIva : 0);
+    final scheme = Theme.of(context).colorScheme;
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 4, 12, 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            period == null ? 'Todos los meses' : formatMonthLong(period!),
+            style: const TextStyle(fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 6),
+          Text('$count comprobante(s) · ${formatGs(total)}'),
+          Text('IVA ${formatGs(iva)}', style: TextStyle(color: scheme.outline)),
+          if (summary.sinConversion > 0)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text(
+                '${summary.sinConversion} en moneda extranjera sin tipo de cambio quedaron fuera '
+                'de estos totales.',
+                style: TextStyle(color: scheme.error, fontSize: 12),
+              ),
+            ),
+        ],
       ),
     );
   }
 }
 
 class _EmptyState extends StatelessWidget {
+  const _EmptyState({this.period});
+
+  final DateTime? period;
+
   @override
   Widget build(BuildContext context) {
     return ListView(
@@ -180,14 +308,23 @@ class _EmptyState extends StatelessWidget {
         Icon(Icons.receipt_long_outlined,
             size: 64, color: Theme.of(context).colorScheme.primary),
         const SizedBox(height: 16),
-        const Center(child: Text('Sin facturas todavía')),
+        Center(
+          child: Text(
+            period == null
+                ? 'Sin facturas todavía'
+                : 'Sin facturas de ${formatMonthLong(period!)}',
+          ),
+        ),
         const SizedBox(height: 4),
-        const Center(
+        Center(
           child: Padding(
-            padding: EdgeInsets.symmetric(horizontal: 32),
+            padding: const EdgeInsets.symmetric(horizontal: 32),
             child: Text(
-              'Tocá "Importar XML" para una factura electrónica, o el ícono de '
-              'cámara para sacarle una foto a una factura de papel.',
+              period == null
+                  ? 'Tocá "Importar XML" para una factura electrónica, o el ícono de '
+                      'cámara para sacarle una foto a una factura de papel.'
+                  : 'Las facturas se cuentan en el mes que tienen impreso. Probá otro mes, '
+                      'o cargá las de éste.',
               textAlign: TextAlign.center,
             ),
           ),
@@ -204,6 +341,7 @@ class _InvoiceTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final converted = formatConverted(invoice.totalOpe, invoice.moneda, invoice.tipoCambio);
     return ListTile(
       leading: CircleAvatar(
         child: Text(tipoDocLabel(invoice.tipoDoc, invoice.tipoDocDesc).substring(0, 1)),
@@ -212,9 +350,21 @@ class _InvoiceTile extends StatelessWidget {
       subtitle: Text(
         '${tipoDocLabel(invoice.tipoDoc, invoice.tipoDocDesc)} · ${formatDocDate(invoice.fechaEmision)}',
       ),
-      trailing: Text(
-        formatMoney(invoice.totalOpe, invoice.moneda),
-        style: const TextStyle(fontWeight: FontWeight.bold),
+      trailing: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Text(
+            formatMoney(invoice.totalOpe, invoice.moneda),
+            style: const TextStyle(fontWeight: FontWeight.bold),
+          ),
+          // A dollar invoice is closed in guaraníes: say at which rate.
+          if (converted != null)
+            Text(
+              converted,
+              style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.outline),
+            ),
+        ],
       ),
       onTap: () => context.push('${AppRoutes.captura}/${invoice.id}'),
     );

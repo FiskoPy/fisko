@@ -8,3 +8,13 @@ import '../data/reports_api.dart';
 final fiscalSummaryProvider = FutureProvider<FiscalSummary>((ref) {
   return ref.watch(reportsApiProvider).summary();
 });
+
+/// The month the Reports tab is working on: what gets summarised and exported.
+/// Null means every month, which is what the dashboard shows.
+final reportMonthProvider = StateProvider<DateTime?>((ref) => null);
+
+/// The summary of [reportMonthProvider] — the same numbers the export carries.
+final monthSummaryProvider = FutureProvider<FiscalSummary>((ref) {
+  final month = ref.watch(reportMonthProvider);
+  return ref.watch(reportsApiProvider).summary(month: month);
+});

@@ -69,15 +69,19 @@ export function buildInsights(input: InsightInput): Insight[] {
   const { summary: s, lastInvoiceAt, recentCount, recentTotal, now } = input;
   const out: Insight[] = [];
 
-  // 1. Spend report every 10 days.
+  // 1. What came in lately. This counts invoices by the day they were LOADED,
+  // not by the day they were issued, and the two are often different months —
+  // the client loaded August invoices in September and read "gastaste … en los
+  // últimos 10 días" as his September spending. The card says what it means
+  // now, and points at the month a comprobante actually counts in.
   if (recentCount > 0) {
     out.push({
       kind: 'gasto_periodo',
       level: 'info',
-      title: `Gastaste ${fmtGs(recentTotal)} en los últimos 10 días`,
+      title: `Cargaste ${recentCount} comprobante(s) en los últimos 10 días`,
       body:
-        `${recentCount} comprobante(s) nuevos. ` +
-        `En el período llevás ${fmtGs(s.compras)} en compras.`,
+        `Suman ${fmtGs(recentTotal)}. Cada uno cuenta en el mes que tiene impreso, ` +
+        `no en el día que lo cargaste. En total llevás ${fmtGs(s.compras)} en compras.`,
       action: { label: 'Ver reportes', route: '/relatorios' },
     });
   }

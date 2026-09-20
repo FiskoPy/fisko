@@ -6,6 +6,9 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../../core/errors/error_message.dart';
+import '../../core/format.dart';
+import '../reports/application/summary_controller.dart';
+import '../reports/data/models/summary_models.dart';
 import '../reports/data/reports_api.dart';
 
 class RelatoriosPage extends ConsumerStatefulWidget {
@@ -21,10 +24,15 @@ class _RelatoriosPageState extends ConsumerState<RelatoriosPage> {
   Future<void> _generate(String format) async {
     setState(() => _busy = format);
     try {
-      final bytes = await ref.read(reportsApiProvider).export(format);
+      final month = ref.read(reportMonthProvider);
+      final bytes = await ref.read(reportsApiProvider).export(format, month: month);
       final dir = await getTemporaryDirectory();
       final ext = format == 'excel' ? 'xlsx' : 'pdf';
-      final file = File('${dir.path}/fisko-reporte.$ext');
+      // The accountant gets one file per month; the name has to say which.
+      final tag = month == null
+          ? 'todo'
+          : '${month.year}-${month.month.toString().padLeft(2, '0')}';
+      final file = File('${dir.path}/fisko-reporte-$tag.$ext');
       await file.writeAsBytes(bytes);
       await Share.shareXFiles([XFile(file.path)], subject: 'Reporte fiscal Fisko');
     } catch (e) {
@@ -51,6 +59,13 @@ class _RelatoriosPageState extends ConsumerState<RelatoriosPage> {
             'a partir de las facturas importadas. Podés compartirlo (incl. por WhatsApp).',
             style: TextStyle(color: Theme.of(context).colorScheme.outline),
           ),
+          const SizedBox(height: 16),
+          // The IVA is declared month by month, so the report is asked for a
+          // month. The client closed August in September and had no way to
+          // tell the two apart.
+          const _MonthPicker(),
+          const SizedBox(height: 16),
+          const _MonthTotals(),
           const SizedBox(height: 24),
           _ReportButton(
             label: 'Generar PDF',
@@ -70,6 +85,90 @@ class _RelatoriosPageState extends ConsumerState<RelatoriosPage> {
         ],
       ),
     );
+  }
+}
+
+/// Which month the report covers. The months offered are the ones that have
+/// invoices, newest first, plus the current one.
+class _MonthPicker extends ConsumerWidget {
+  const _MonthPicker();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final selected = ref.watch(reportMonthProvider);
+    final summary = ref.watch(fiscalSummaryProvider).valueOrNull;
+    final now = DateTime.now();
+    final months = <DateTime>{DateTime.utc(now.year, now.month)};
+    for (final b in summary?.byMonth ?? const <MonthBucket>[]) {
+      final parts = b.month.split('-');
+      if (parts.length >= 2) {
+        final y = int.tryParse(parts[0]);
+        final m = int.tryParse(parts[1]);
+        if (y != null && m != null) months.add(DateTime.utc(y, m));
+      }
+    }
+    final ordered = months.toList()..sort((a, b) => b.compareTo(a));
+
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        for (final m in ordered)
+          ChoiceChip(
+            label: Text(formatMonth(m)),
+            selected: selected != null && selected.year == m.year && selected.month == m.month,
+            onSelected: (_) => ref.read(reportMonthProvider.notifier).state = m,
+          ),
+        ChoiceChip(
+          label: const Text('Todos'),
+          selected: selected == null,
+          onSelected: (_) => ref.read(reportMonthProvider.notifier).state = null,
+        ),
+      ],
+    );
+  }
+}
+
+/// What that month adds up to — the same figures the file will carry.
+class _MonthTotals extends ConsumerWidget {
+  const _MonthTotals();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final month = ref.watch(reportMonthProvider);
+    final scheme = Theme.of(context).colorScheme;
+    return ref.watch(monthSummaryProvider).when(
+          loading: () => const LinearProgressIndicator(),
+          error: (_, __) => const SizedBox.shrink(),
+          data: (s) => Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: scheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  month == null ? 'Todos los meses' : formatMonthLong(month),
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 6),
+                Text('${s.count} comprobante(s) - compras ${formatGs(s.compras)}'),
+                Text('IVA crédito ${formatGs(s.ivaCredito)} - IVA débito ${formatGs(s.ivaDebito)}',
+                    style: TextStyle(color: scheme.outline)),
+                if (s.sinConversion > 0)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Text(
+                      '${s.sinConversion} en moneda extranjera sin tipo de cambio quedaron fuera.',
+                      style: TextStyle(color: scheme.error, fontSize: 12),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        );
   }
 }
 

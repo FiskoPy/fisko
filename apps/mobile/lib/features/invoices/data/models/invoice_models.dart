@@ -34,6 +34,9 @@ class Invoice with _$Invoice {
     String? receptorNombre,
     required DateTime fechaEmision,
     @Default('PYG') String moneda,
+    // Guaraníes per unit of [moneda]. Null for a guaraní invoice, and for a
+    // foreign one loaded before the reader could read its rate.
+    double? tipoCambio,
     required double totalOpe,
     required double totalIva,
     required double iva5,

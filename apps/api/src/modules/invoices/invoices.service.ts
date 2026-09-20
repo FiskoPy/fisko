@@ -45,6 +45,8 @@ export interface PublicInvoice {
   receptorNombre: string | null;
   fechaEmision: Date;
   moneda: string;
+  /** Guaraníes per unit of `moneda`, for anything not issued in guaraníes. */
+  tipoCambio: number | null;
   totalOpe: number;
   totalIva: number;
   iva5: number;
@@ -84,6 +86,10 @@ export function toPublicInvoice(inv: Invoice & { items?: InvoiceItem[] }): Publi
     receptorNombre: inv.receptorNombre,
     fechaEmision: inv.fechaEmision,
     moneda: inv.moneda,
+    // The rate the invoice itself carries: without it the app can show USD
+    // 3.420 but not what that is in guaraníes, which is the figure the month
+    // is closed with.
+    tipoCambio: inv.tipoCambio == null ? null : n(inv.tipoCambio),
     totalOpe: n(inv.totalOpe),
     totalIva: n(inv.totalIva),
     iva5: n(inv.iva5),

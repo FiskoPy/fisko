@@ -104,6 +104,24 @@ class _Detail extends StatelessWidget {
                     )),
           ],
         ),
+        // In guaraníes, at the rate printed on the invoice: that is the figure
+        // this factura carries into the month's IVA.
+        if (formatConverted(inv.totalOpe, inv.moneda, inv.tipoCambio) case final converted?)
+          Align(
+            alignment: Alignment.centerRight,
+            child: Text(
+              converted,
+              style: TextStyle(color: Theme.of(context).colorScheme.outline),
+            ),
+          )
+        else if ((inv.moneda).toUpperCase() != 'PYG')
+          Align(
+            alignment: Alignment.centerRight,
+            child: Text(
+              'Sin tipo de cambio: queda fuera de los totales en guaraníes.',
+              style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12),
+            ),
+          ),
         const Divider(height: 24),
         Text('Ítems (${inv.items?.length ?? 0})',
             style: Theme.of(context).textTheme.titleMedium),

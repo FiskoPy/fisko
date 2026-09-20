@@ -7,6 +7,17 @@ final _date = DateFormat('dd/MM/yyyy', 'es');
 
 String formatGs(num value) => 'Gs ${_gs.format(value)}';
 
+final _month = DateFormat('MMM yyyy', 'es');
+final _monthLong = DateFormat('MMMM yyyy', 'es');
+
+String _capitalize(String s) => s.isEmpty ? s : s[0].toUpperCase() + s.substring(1);
+
+/// "Ago 2026" — for the month chips.
+String formatMonth(DateTime month) => _capitalize(_month.format(month)).replaceAll('.', '');
+
+/// "Agosto 2026" — for the heading of a month's totals.
+String formatMonthLong(DateTime month) => _capitalize(_monthLong.format(month));
+
 /// Formats an amount in the currency the invoice was actually issued in.
 ///
 /// Rendering a USD invoice as "Gs 448" made a foreign bill look like a trivial
@@ -16,6 +27,15 @@ String formatMoney(num value, String? moneda) {
   final code = (moneda ?? 'PYG').toUpperCase();
   if (code == 'PYG') return formatGs(value);
   return '$code ${_money.format(value)}';
+}
+
+/// What a foreign invoice is worth in guaraníes, and at which rate — the
+/// figure a month is closed with. Null when the invoice is already in
+/// guaraníes, or when no rate was read and it is left out of the totals.
+String? formatConverted(num value, String? moneda, num? tipoCambio) {
+  if ((moneda ?? 'PYG').toUpperCase() == 'PYG') return null;
+  if (tipoCambio == null || tipoCambio <= 0) return null;
+  return '≈ ${formatGs(value * tipoCambio)} · cambio ${_money.format(tipoCambio)}';
 }
 
 /// An instant — when something happened on the server — in the phone's zone.

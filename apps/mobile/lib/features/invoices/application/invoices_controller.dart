@@ -19,11 +19,23 @@ class InvoicesController extends Notifier<InvoicesState> {
   Future<void> load() async {
     state = state.copyWith(isLoading: true, clearMessages: true);
     try {
-      final res = await _repo.list(pageSize: 100);
+      final p = state.period;
+      final res = await _repo.list(
+        pageSize: 100,
+        from: p,
+        to: p == null ? null : DateTime.utc(p.year, p.month + 1, 0),
+      );
       state = state.copyWith(isLoading: false, invoices: res.items, total: res.total);
     } on Failure catch (f) {
       state = state.copyWith(isLoading: false, errorMessage: f.message);
     }
+  }
+
+  /// Shows one month — by the date printed on the invoice — or every month
+  /// when [month] is null. A month is what gets closed and declared.
+  Future<void> setPeriod(DateTime? month) async {
+    state = state.copyWith(period: month, allMonths: month == null);
+    await load();
   }
 
   /// Imports a DTE XML. Returns true on success.

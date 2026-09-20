@@ -35,10 +35,25 @@ class InvoicesApi {
     );
   }
 
-  Future<InvoiceList> list({int page = 1, int pageSize = 20}) async {
+  /// Lists invoices, optionally only those ISSUED within [from]..[to].
+  ///
+  /// The dates are the ones printed on the invoice, which is what a month's
+  /// closing is about: an August invoice loaded in September belongs to
+  /// August's IVA, however late it arrived.
+  Future<InvoiceList> list({
+    int page = 1,
+    int pageSize = 20,
+    DateTime? from,
+    DateTime? to,
+  }) async {
     final res = await _dio.get<Map<String, dynamic>>(
       '/invoices',
-      queryParameters: {'page': page, 'pageSize': pageSize},
+      queryParameters: {
+        'page': page,
+        'pageSize': pageSize,
+        if (from != null) 'from': from.toIso8601String().substring(0, 10),
+        if (to != null) 'to': to.toIso8601String().substring(0, 10),
+      },
     );
     return InvoiceList.fromJson(res.data!);
   }

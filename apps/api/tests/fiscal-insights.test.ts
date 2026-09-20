@@ -37,11 +37,21 @@ const input = (over: Partial<InsightInput> = {}): InsightInput => ({
 const kinds = (i: ReturnType<typeof buildInsights>) => i.map((x) => x.kind);
 
 describe('buildInsights — spend report', () => {
-  it('reports the 10-day spend when something was imported', () => {
+  it('reports what came in over the 10 days, by the day it was loaded', () => {
     const out = buildInsights(input({ recentCount: 3, recentTotal: 1_250_000 }));
     const gasto = out.find((i) => i.kind === 'gasto_periodo');
     expect(gasto).toBeDefined();
-    expect(gasto!.title).toContain('1.250.000');
+    expect(gasto!.title).toContain('3 comprobante(s)');
+    expect(gasto!.body).toContain('1.250.000');
+  });
+
+  it('does not call it spending of the period: the invoices can be of another month', () => {
+    // August invoices loaded in September read as September's spending, and
+    // the client took the figure for his month (2026-09-20).
+    const out = buildInsights(input({ recentCount: 5, recentTotal: 35_688_756 }));
+    const gasto = out.find((i) => i.kind === 'gasto_periodo');
+    expect(gasto!.title).not.toMatch(/gastaste/i);
+    expect(gasto!.body).toMatch(/mes que tiene impreso/i);
   });
 
   it('stays silent when nothing came in', () => {

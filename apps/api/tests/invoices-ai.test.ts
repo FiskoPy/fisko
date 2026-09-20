@@ -103,6 +103,10 @@ describe('a dollar invoice', () => {
     const res = await post();
 
     expect(res.status).toBe(201);
+    // The app shows "USD 1.538,00 ≈ Gs 9.270.941 · cambio 6.027,92", so the
+    // rate has to travel with the invoice — the client asked what rate each
+    // dollar invoice went in at (2026-09-20).
+    expect(res.body.invoice).toMatchObject({ moneda: 'USD', tipoCambio: 6_027.92 });
     const invoice = await storedInvoice();
     expect({
       moneda: invoice.moneda,
