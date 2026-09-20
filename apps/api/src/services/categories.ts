@@ -58,7 +58,8 @@ export const CATEGORIES: CategoryDef[] = [
       // Trade names seen on the client's own invoices.
       /\b(acrux|acruz|tactic|diadem|capaz)\b/,
       // The trade: a business that names itself agro sells agro.
-      /\b(agro ?(?:servicios?|insumos?|campo|centro|quimica|ciencia|tienda)|agropecuaria|agroveterinaria|semilleria|cooperativa agricola)\b/,
+      /\bagro ?(?:chemical|quimic|servicio|insumo|campo|centro|ciencia|tienda|pecuari|veterinari|industri|negocio)/,
+      /\b(semilleria|cooperativa agricola)\b/,
       /\b(agro)\b(?=.*\b(?:s\.?a|s\.?r\.?l|e\.?a\.?s|ltda|cia)\b)/,
     ],
   },

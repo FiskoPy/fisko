@@ -309,6 +309,30 @@ export async function getSummary(userId: string, period: ReportPeriod): Promise<
 const fmtGs = (v: number): string =>
   'Gs ' + Math.round(v).toLocaleString('es-PY').replace(/,/g, '.');
 
+/**
+ * The parts of the period, rounded so that they add up to the printed total.
+ *
+ * Each figure is exact to the guaraní inside the invoice, but rounding five of
+ * them separately leaves the column one guaraní short of the total — and the
+ * person reading the report adds the column. The taxed base takes the
+ * difference, as it does inside each invoice.
+ */
+export function printedParts(s: FiscalSummary): {
+  base5: number;
+  iva5: number;
+  base10: number;
+  iva10: number;
+  exentas: number;
+  total: number;
+} {
+  const base5 = Math.round(s.baseGrav5);
+  const iva5 = Math.round(s.iva5);
+  const iva10 = Math.round(s.iva10);
+  const exentas = Math.round(s.exentas);
+  const total = Math.round(s.totalOpe);
+  return { base5, iva5, base10: total - base5 - iva5 - iva10 - exentas, iva10, exentas, total };
+}
+
 // Brand palette, kept in sync with the app's theme (apps/mobile/lib/core/theme).
 // IVA5/IVA10 are reserved: green always means the 5% rate, amber the 10% one.
 const BRAND = '#14508F'; // azul Ypacaraí
@@ -392,16 +416,19 @@ export async function buildPdf(summary: FiscalSummary, detail?: ReportDetail): P
 
   doc.fontSize(13).fillColor(BRAND).text('IVA');
   doc.moveDown(0.3);
+  // Rounded so the column adds up to the total below it, which is what the
+  // person holding the page will do.
+  const parts = printedParts(summary);
   // Same colour discipline as the app: green is always 5%, amber always 10%.
-  line('Base imponible 5% (sin IVA)', fmtGs(summary.baseGrav5));
-  line('IVA 5%', fmtGs(summary.iva5), false, IVA5);
-  line('Base imponible 10% (sin IVA)', fmtGs(summary.baseGrav10));
-  line('IVA 10%', fmtGs(summary.iva10), false, IVA10);
+  line('Base imponible 5% (sin IVA)', fmtGs(parts.base5));
+  line('IVA 5%', fmtGs(parts.iva5), false, IVA5);
+  line('Base imponible 10% (sin IVA)', fmtGs(parts.base10));
+  line('IVA 10%', fmtGs(parts.iva10), false, IVA10);
   line('Total IVA', fmtGs(summary.totalIva), true);
   doc.moveDown(0.6);
 
-  line('Exentas', fmtGs(summary.exentas));
-  line('Total del período', fmtGs(summary.totalOpe), true);
+  line('Exentas', fmtGs(parts.exentas));
+  line('Total del período', fmtGs(parts.total), true);
   doc.moveDown(0.6);
 
   doc.fontSize(13).fillColor(BRAND).text('Liquidación del IVA');
