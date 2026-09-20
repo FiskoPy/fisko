@@ -4,6 +4,12 @@ import { logger } from '../../lib/logger';
 import { AppError } from '../../errors/app-error';
 import { parseDte, isValidCdcCheckDigit } from '../../services/sifen';
 import { readInvoiceWithAI } from '../../services/ai-reader';
+import {
+  CATEGORIES,
+  categorize,
+  categoryLabel,
+  type CategoryKey,
+} from '../../services/categories';
 import { extractText, MAX_IMAGE_BYTES } from '../../services/ocr';
 import { decidePhoto, type PhotoDecision } from '../../services/photo-decision';
 import {
@@ -54,6 +60,10 @@ export interface PublicInvoice {
   baseGrav5: number;
   baseGrav10: number;
   exentas: number;
+  /** The category: the one set by hand, or the one the rules derive. */
+  categoria: string;
+  categoriaLabel: string;
+  categoriaManual: boolean;
   originalCdc: string | null;
   source: string;
   createdAt: Date;
@@ -72,6 +82,19 @@ function toPublicItem(i: InvoiceItem): PublicInvoiceItem {
     ivaBase: n(i.ivaBase),
     ivaMonto: n(i.ivaMonto),
   };
+}
+
+/** What the invoice is filed under, and whether a person chose it. */
+function categoryOf(inv: Invoice & { items?: InvoiceItem[] }): {
+  categoria: string;
+  categoriaLabel: string;
+  categoriaManual: boolean;
+} {
+  const manual = inv.categoria as CategoryKey | null;
+  const key =
+    manual ??
+    categorize(inv.emisorNombre ?? '', (inv.items ?? []).map((i) => i.descripcion));
+  return { categoria: key, categoriaLabel: categoryLabel(key), categoriaManual: manual != null };
 }
 
 export function toPublicInvoice(inv: Invoice & { items?: InvoiceItem[] }): PublicInvoice {
@@ -98,6 +121,7 @@ export function toPublicInvoice(inv: Invoice & { items?: InvoiceItem[] }): Publi
     baseGrav5: n(inv.baseGrav5),
     baseGrav10: n(inv.baseGrav10),
     exentas: n(inv.exentas),
+    ...categoryOf(inv),
     originalCdc: inv.originalCdc,
     source: inv.source,
     createdAt: inv.createdAt,
@@ -325,6 +349,31 @@ export async function getInvoice(userId: string, id: string): Promise<PublicInvo
   })) as InvoiceWithItems | null;
   if (!inv) throw AppError.notFound('Factura no encontrada');
   return toPublicInvoice(inv);
+}
+
+/**
+ * Files an invoice under another category, or back under the rules (null).
+ *
+ * The rules cannot know everything — an agrochemical invoice read as "Otros"
+ * is useless to the client — so he corrects it, and what he corrects stays
+ * corrected while everything else follows an improved ruleset.
+ */
+export async function setCategoria(
+  userId: string,
+  id: string,
+  categoria: string | null,
+): Promise<PublicInvoice> {
+  if (categoria != null && !CATEGORIES.some((c) => c.key === categoria)) {
+    throw AppError.badRequest('Categoría desconocida');
+  }
+  const invoice = await prisma.invoice.findFirst({ where: { id, userId }, select: { id: true } });
+  if (!invoice) throw AppError.notFound('Factura no encontrada');
+  const updated = await prisma.invoice.update({
+    where: { id },
+    data: { categoria },
+    include: { items: true },
+  });
+  return toPublicInvoice(updated);
 }
 
 export async function deleteInvoice(userId: string, id: string): Promise<void> {

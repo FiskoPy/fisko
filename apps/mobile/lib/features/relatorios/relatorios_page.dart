@@ -154,8 +154,25 @@ class _MonthTotals extends ConsumerWidget {
                   style: const TextStyle(fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 6),
-                Text('${s.count} comprobante(s) - compras ${formatGs(s.compras)}'),
-                Text('IVA crédito ${formatGs(s.ivaCredito)} - IVA débito ${formatGs(s.ivaDebito)}',
+                Text(
+                  '${s.count} comprobante(s) computables'
+                  '${s.sinOperacion > 0 ? " - ${s.sinOperacion} nota(s) de remisión" : ""}'
+                  ' - compras ${formatGs(s.compras)}',
+                ),
+                const SizedBox(height: 10),
+                // The liquidation, in the order it is declared. A credit
+                // balance is not something owed: it carries to the next period.
+                _StatementRow(label: 'IVA crédito (compras)', value: s.ivaCredito),
+                _StatementRow(label: 'IVA débito (ventas)', value: s.ivaDebito),
+                _StatementRow(label: 'Saldo a favor anterior', value: s.saldoAnterior),
+                _StatementRow(label: 'IVA a pagar', value: s.ivaAPagar, bold: true),
+                _StatementRow(
+                  label: 'Saldo a favor al período siguiente',
+                  value: s.saldoSiguiente,
+                  bold: true,
+                ),
+                const SizedBox(height: 6),
+                Text('${s.rentaRegimen} estimado ${formatGs(s.rentaEstimado)}',
                     style: TextStyle(color: scheme.outline)),
                 if (s.sinConversion > 0)
                   Padding(
@@ -169,6 +186,30 @@ class _MonthTotals extends ConsumerWidget {
             ),
           ),
         );
+  }
+}
+
+/// One line of the IVA liquidation.
+class _StatementRow extends StatelessWidget {
+  const _StatementRow({required this.label, required this.value, this.bold = false});
+
+  final String label;
+  final double value;
+  final bool bold;
+
+  @override
+  Widget build(BuildContext context) {
+    final style = TextStyle(fontWeight: bold ? FontWeight.bold : FontWeight.normal);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: style),
+          Text(formatGs(value), style: style),
+        ],
+      ),
+    );
   }
 }
 

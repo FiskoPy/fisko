@@ -62,13 +62,13 @@ class InvoiceDetailPage extends ConsumerWidget {
   }
 }
 
-class _Detail extends StatelessWidget {
+class _Detail extends ConsumerWidget {
   const _Detail({required this.invoice});
 
   final Invoice invoice;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final inv = invoice;
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -78,6 +78,7 @@ class _Detail extends StatelessWidget {
         const SizedBox(height: 8),
         _row('Tipo', tipoDocLabel(inv.tipoDoc, inv.tipoDocDesc)),
         _row('Fecha', formatDocDate(inv.fechaEmision)),
+        _CategoriaRow(invoice: inv),
         if (inv.receptorNombre != null) _row('Receptor', inv.receptorNombre!),
         _row('CDC', inv.cdc, mono: true),
         const Divider(height: 24),
@@ -144,6 +145,106 @@ class _Detail extends StatelessWidget {
               style: mono ? const TextStyle(fontFamily: 'monospace', fontSize: 12) : null,
             ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+/// What the invoice is filed under — and a way to correct it.
+///
+/// The rules read the issuer and the items, and cannot know everything: the
+/// client's agrochemicals were landing in "Otros". What he corrects stays
+/// corrected; what he leaves alone follows the rules, so a better ruleset
+/// still reaches it.
+class _CategoriaRow extends ConsumerStatefulWidget {
+  const _CategoriaRow({required this.invoice});
+
+  final Invoice invoice;
+
+  @override
+  ConsumerState<_CategoriaRow> createState() => _CategoriaRowState();
+}
+
+class _CategoriaRowState extends ConsumerState<_CategoriaRow> {
+  bool _saving = false;
+
+  static const _options = <String, String>{
+    'insumos_agricolas': 'Insumos agrícolas',
+    'combustible': 'Combustible',
+    'supermercado': 'Supermercado y despensa',
+    'alimentacion': 'Alimentación',
+    'servicios_basicos': 'Servicios básicos',
+    'telecomunicaciones': 'Telecomunicaciones',
+    'transporte': 'Transporte',
+    'salud': 'Salud',
+    'educacion': 'Educación',
+    'tecnologia': 'Tecnología',
+    'financiero': 'Financiero',
+    'alquiler': 'Alquiler',
+    'vestimenta': 'Vestimenta',
+    'otros': 'Otros',
+  };
+
+  Future<void> _pick() async {
+    final chosen = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            for (final e in _options.entries)
+              ListTile(
+                title: Text(e.value),
+                trailing: e.key == widget.invoice.categoria ? const Icon(Icons.check) : null,
+                onTap: () => Navigator.pop(ctx, e.key),
+              ),
+            if (widget.invoice.categoriaManual)
+              ListTile(
+                leading: const Icon(Icons.auto_fix_high_outlined),
+                title: const Text('Volver a la categoría automática'),
+                onTap: () => Navigator.pop(ctx, '__auto__'),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (chosen == null || !mounted) return;
+
+    setState(() => _saving = true);
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await ref
+          .read(invoicesRepositoryProvider)
+          .setCategoria(widget.invoice.id, chosen == '__auto__' ? null : chosen);
+      ref.invalidate(invoiceDetailProvider(widget.invoice.id));
+      ref.read(invoicesControllerProvider.notifier).refreshAfterChange();
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(friendlyError(e))));
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final inv = widget.invoice;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          const Text('Categoría'),
+          _saving
+              ? const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2))
+              : TextButton.icon(
+                  onPressed: _pick,
+                  icon: const Icon(Icons.edit_outlined, size: 16),
+                  label: Text(
+                    inv.categoriaLabel + (inv.categoriaManual ? '' : ' (automática)'),
+                  ),
+                ),
         ],
       ),
     );

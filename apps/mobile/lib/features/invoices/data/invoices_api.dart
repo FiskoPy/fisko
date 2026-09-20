@@ -63,6 +63,15 @@ class InvoicesApi {
     return Invoice.fromJson(res.data!['invoice'] as Map<String, dynamic>);
   }
 
+  /// Files the invoice under [categoria], or back under the rules (null).
+  Future<Invoice> setCategoria(String id, String? categoria) async {
+    final res = await _dio.patch<Map<String, dynamic>>(
+      '/invoices/$id/categoria',
+      data: {'categoria': categoria},
+    );
+    return Invoice.fromJson(res.data!['invoice'] as Map<String, dynamic>);
+  }
+
   Future<void> delete(String id) async {
     await _dio.delete<Map<String, dynamic>>('/invoices/$id');
   }

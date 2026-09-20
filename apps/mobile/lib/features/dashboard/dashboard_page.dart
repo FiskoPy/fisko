@@ -86,8 +86,10 @@ class _Dashboard extends StatelessWidget {
               icon: Icons.receipt_long,
             ),
             _StatCard(
-              label: 'IRP estimado',
-              value: formatGs(s.irpEstimado),
+              // A company files IRE, a person IRP: the client's E.A.S. was
+              // being offered an IRP figure it does not pay.
+              label: '${s.rentaRegimen} estimado',
+              value: formatGs(s.rentaEstimado),
               icon: Icons.account_balance,
             ),
           ],
@@ -131,7 +133,7 @@ class _Dashboard extends StatelessWidget {
         ],
         const SizedBox(height: 20),
         Text(
-          'El IRP se estima de forma simplificada. No constituye asesoría fiscal.',
+          'El ${s.rentaRegimen} se estima de forma simplificada. No constituye asesoría fiscal.',
           style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.outline),
         ),
       ],

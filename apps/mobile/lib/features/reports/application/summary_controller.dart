@@ -9,8 +9,10 @@ final fiscalSummaryProvider = FutureProvider<FiscalSummary>((ref) {
   return ref.watch(reportsApiProvider).summary();
 });
 
-/// The month the Reports tab is working on: what gets summarised and exported.
-/// Null means every month, which is what the dashboard shows.
+/// The month every screen is working on — the list, the reports and the
+/// dashboard. The IVA is declared by month, and three screens each holding
+/// their own idea of "now" is how August's figures read as September's.
+/// Null means every month.
 final reportMonthProvider = StateProvider<DateTime?>((ref) => null);
 
 /// The summary of [reportMonthProvider] — the same numbers the export carries.

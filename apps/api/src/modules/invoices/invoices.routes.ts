@@ -20,4 +20,5 @@ invoicesRouter.post('/import-xml', asyncHandler(invoicesController.importXml));
 invoicesRouter.post('/import-photo', ocrLimiter, photoBodyLimit, asyncHandler(invoicesController.importPhoto));
 invoicesRouter.get('/', asyncHandler(invoicesController.list));
 invoicesRouter.get('/:id', asyncHandler(invoicesController.detail));
+invoicesRouter.patch('/:id/categoria', asyncHandler(invoicesController.categoria));
 invoicesRouter.delete('/:id', asyncHandler(invoicesController.remove));

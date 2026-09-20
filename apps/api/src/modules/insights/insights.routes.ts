@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { z } from 'zod';
 import { asyncHandler } from '../../utils/async-handler';
 import { requireAuth, type AuthedRequest } from '../../middleware/auth';
 import { AppError } from '../../errors/app-error';
@@ -14,17 +15,28 @@ insightsRouter.use(requireAuth);
 
 const RECENT_WINDOW_DAYS = 10;
 
+/** The period the app is looking at, by the date printed on the invoice. */
+const periodQuerySchema = z.object({
+  from: z.coerce.date().optional(),
+  to: z.coerce.date().optional(),
+});
+
 insightsRouter.get(
   '/',
   asyncHandler(async (req, res) => {
     const user = (req as AuthedRequest).user;
     if (!user) throw AppError.unauthorized();
 
+    // The screen that shows these picks a month, and everything it shows has
+    // to be about that month — the client read a figure of August as his
+    // September spending (2026-09-20). The 10-day card stays about what was
+    // loaded, which is the one thing here that is not about the period.
+    const period = periodQuerySchema.parse(req.query);
     const now = new Date();
     const since = new Date(now.getTime() - RECENT_WINDOW_DAYS * 86_400_000);
 
     const [summary, latest, recent, owner] = await Promise.all([
-      getSummary(user.sub, {}),
+      getSummary(user.sub, period),
       // When the newest invoice ENTERED Fisko, not its emission date: the nudge
       // says "hace N días que no entra una factura", and a February invoice
       // imported today used to make it say 199 days one second after import.

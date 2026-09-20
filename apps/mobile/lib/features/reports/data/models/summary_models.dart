@@ -42,6 +42,17 @@ class FiscalSummary with _$FiscalSummary {
     @Default(0) double compras,
     @Default(0) double ivaCredito,
     @Default(0) double ivaDebito,
+    // The statement as it is declared: what an earlier period left over, what
+    // is actually paid, and what carries on.
+    @Default(0) double saldoAnterior,
+    @Default(0) double ivaAPagar,
+    @Default(0) double saldoSiguiente,
+    // IRE for a company, IRP for a person.
+    @Default('IRP') String rentaRegimen,
+    @Default(0) double rentaEstimado,
+    @Default(0) int documentos,
+    @Default(0) int sinOperacion,
+    @Default(0) double exentas,
     @Default(0) double irpEstimado,
     @Default(0) int sinConversion,
     @Default([]) List<MonthBucket> byMonth,

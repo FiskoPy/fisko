@@ -39,6 +39,18 @@ export interface FiscalSummary {
   compras: number; // facturas donde el usuario es receptor (gastos)
   ivaCredito: number; // IVA de compras
   ivaDebito: number; // IVA de ventas
+  /**
+   * The IVA statement as it is declared, and as the client asked for it:
+   * what was credited, what was owed, what a previous period left in his
+   * favour, what he actually pays, and what carries on.
+   */
+  saldoAnterior: number;
+  ivaAPagar: number;
+  saldoSiguiente: number;
+  /** IRE for a company, IRP for a person: an E.A.S. does not pay IRP. */
+  rentaRegimen: 'IRE' | 'IRP';
+  rentaEstimado: number;
+  /** @deprecated use rentaEstimado/rentaRegimen — kept for older app builds. */
   irpEstimado: number; // estimación simplificada
   /// Invoices left OUT of the totals: a foreign currency with no usable rate.
   /// Silently adding those to the guaraní totals produced a wrong tax figure.
@@ -55,6 +67,64 @@ export interface FiscalSummary {
 
 const num = (d: unknown): number => (d == null ? 0 : Number(d));
 
+/**
+ * Which income tax this taxpayer estimates: a company files IRE, a person
+ * IRP. Stated in the profile; a RUC that is not a natural person's (Paraguay
+ * gives companies eight digits starting with 8) is taken as a company.
+ */
+export function rentaRegimenOf(user: {
+  tipoContribuyente?: string | null;
+  ruc?: string | null;
+}): 'IRE' | 'IRP' {
+  if (user.tipoContribuyente === 'juridica') return 'IRE';
+  if (user.tipoContribuyente === 'fisica') return 'IRP';
+  const ruc = (user.ruc ?? '').replace(/\D/g, '');
+  return ruc.length >= 8 && ruc.startsWith('8') ? 'IRE' : 'IRP';
+}
+
+/**
+ * The IVA credit a period starts with: what earlier periods left over.
+ *
+ * Each month pays max(0, débito − crédito − saldo) and carries the rest
+ * forward; credit does not expire. Without this the statement could only ever
+ * show one month standing alone, and a client who is always in credit — which
+ * is this one, so far — would never see it accumulate.
+ */
+async function creditCarriedInto(userId: string, from: Date, userRuc: string | null): Promise<number> {
+  const rows = (await prisma.invoice.findMany({
+    where: { userId, fechaEmision: { lt: from } },
+    select: {
+      tipoDoc: true,
+      fechaEmision: true,
+      totalIva: true,
+      emisorRuc: true,
+      moneda: true,
+      tipoCambio: true,
+    },
+    orderBy: { fechaEmision: 'asc' },
+  })) as { tipoDoc: number; fechaEmision: Date; totalIva: unknown; emisorRuc: string; moneda: string; tipoCambio: unknown }[];
+
+  const months = new Map<string, { credito: number; debito: number }>();
+  for (const r of rows) {
+    const rate = r.moneda === 'PYG' ? 1 : num(r.tipoCambio);
+    const sign = documentSign(r.tipoDoc);
+    if (!rate || sign === 0) continue;
+    const iva = num(r.totalIva) * rate * sign;
+    const key = r.fechaEmision.toISOString().slice(0, 7);
+    const b = months.get(key) ?? { credito: 0, debito: 0 };
+    if (userRuc != null && normalizeRuc(r.emisorRuc) === userRuc) b.debito += iva;
+    else b.credito += iva;
+    months.set(key, b);
+  }
+
+  let saldo = 0;
+  for (const key of [...months.keys()].sort()) {
+    const b = months.get(key) as { credito: number; debito: number };
+    saldo = Math.max(0, saldo + b.credito - b.debito);
+  }
+  return saldo;
+}
+
 type Row = {
   tipoDoc: number;
   fechaEmision: Date;
@@ -65,6 +135,7 @@ type Row = {
   baseGrav5: unknown;
   baseGrav10: unknown;
   exentas: unknown;
+  categoria: string | null;
   emisorRuc: string;
   emisorNombre: string;
   moneda: string;
@@ -110,6 +181,7 @@ export async function getSummary(userId: string, period: ReportPeriod): Promise<
       baseGrav5: true,
       baseGrav10: true,
       exentas: true,
+      categoria: true,
       emisorRuc: true,
       emisorNombre: true,
       moneda: true,
@@ -181,10 +253,12 @@ export async function getSummary(userId: string, period: ReportPeriod): Promise<
     b.iva += totalIva;
     months.set(key, b);
 
-    const catKey = categorize(
-      r.emisorNombre ?? '',
-      (r.items ?? []).map((i) => i.descripcion),
-    );
+    // A category set by hand wins over the rules: the client corrects what
+    // the rules could not know, and an improved ruleset still applies to
+    // everything he never touched.
+    const catKey =
+      (r.categoria as CategoryKey | null) ??
+      categorize(r.emisorNombre ?? '', (r.items ?? []).map((i) => i.descripcion));
     const cb = cats.get(catKey) ?? {
       key: catKey,
       label: categoryLabel(catKey),
@@ -198,10 +272,25 @@ export async function getSummary(userId: string, period: ReportPeriod): Promise<
     cats.set(catKey, cb);
   }
 
-  // IRP — estimativa simplificada: 10% sobre o ganho neto positivo (ventas - compras).
-  const irpEstimado = Math.max(0, sum.ventas - sum.compras) * 0.1;
+  // Renta — estimativa simplificada: 10% sobre o ganho neto positivo.
+  const rentaEstimado = Math.max(0, sum.ventas - sum.compras) * 0.1;
+  const owner = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { tipoContribuyente: true, ruc: true, name: true },
+  });
+  const rentaRegimen = rentaRegimenOf(owner ?? {});
+
+  // The IVA of the period, as it is declared.
+  const saldoAnterior = period.from ? await creditCarriedInto(userId, period.from, userRuc) : 0;
+  const ivaAPagar = Math.max(0, sum.ivaDebito - sum.ivaCredito - saldoAnterior);
+  const saldoSiguiente = Math.max(0, sum.ivaCredito + saldoAnterior - sum.ivaDebito);
 
   return {
+    saldoAnterior,
+    ivaAPagar,
+    saldoSiguiente,
+    rentaRegimen,
+    rentaEstimado,
     period: {
       from: period.from ? period.from.toISOString() : null,
       to: period.to ? period.to.toISOString() : null,
@@ -211,7 +300,7 @@ export async function getSummary(userId: string, period: ReportPeriod): Promise<
     documentos: rows.length,
     sinOperacion,
     ...sum,
-    irpEstimado,
+    irpEstimado: rentaEstimado,
     byMonth: [...months.values()].sort((a, b) => a.month.localeCompare(b.month)),
     byCategory: [...cats.values()].sort((a, b) => b.total - a.total),
   };
@@ -226,7 +315,53 @@ const BRAND = '#14508F'; // azul Ypacaraí
 const IVA5 = '#2E8B6F'; // verde
 const IVA10 = '#B8801F'; // ámbar (darkened for contrast on white paper)
 
-export async function buildPdf(summary: FiscalSummary): Promise<Buffer> {
+/** The taxpayer the report is for, and the comprobantes behind its totals. */
+export interface ReportDetail {
+  nombre: string;
+  ruc: string | null;
+  rows: {
+    fechaEmision: Date;
+    tipoDoc: number;
+    emisorNombre: string;
+    numeroDoc: string | null;
+    moneda: string;
+    tipoCambio: unknown;
+    totalOpe: unknown;
+    totalIva: unknown;
+  }[];
+}
+
+const MONTHS_ES = [
+  'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+  'julio', 'agosto', 'setiembre', 'octubre', 'noviembre', 'diciembre',
+];
+
+/** "agosto 2026" when the period is one whole month, else the two dates. */
+export function periodLabel(p: FiscalSummary['period']): string {
+  if (!p.from || !p.to) return `${p.from?.slice(0, 10) ?? 'inicio'} a ${p.to?.slice(0, 10) ?? 'hoy'}`;
+  const from = new Date(p.from);
+  const to = new Date(p.to);
+  const wholeMonth =
+    from.getUTCDate() === 1 &&
+    from.getUTCMonth() === to.getUTCMonth() &&
+    from.getUTCFullYear() === to.getUTCFullYear() &&
+    to.getUTCDate() === new Date(Date.UTC(to.getUTCFullYear(), to.getUTCMonth() + 1, 0)).getUTCDate();
+  if (wholeMonth) return `${MONTHS_ES[from.getUTCMonth()]} ${from.getUTCFullYear()}`;
+  return `${p.from.slice(0, 10)} a ${p.to.slice(0, 10)}`;
+}
+
+const fmtDay = (d: Date): string =>
+  `${String(d.getUTCDate()).padStart(2, '0')}/${String(d.getUTCMonth() + 1).padStart(2, '0')}/${d.getUTCFullYear()}`;
+
+const TIPO_DOC_LABEL: Record<number, string> = {
+  1: 'Factura',
+  4: 'Autofactura',
+  5: 'Nota de crédito',
+  6: 'Nota de débito',
+  7: 'Nota de remisión',
+};
+
+export async function buildPdf(summary: FiscalSummary, detail?: ReportDetail): Promise<Buffer> {
   const doc = new PDFDocument({ size: 'A4', margin: 48 });
   const chunks: Buffer[] = [];
   doc.on('data', (c: Buffer) => chunks.push(c));
@@ -234,9 +369,16 @@ export async function buildPdf(summary: FiscalSummary): Promise<Buffer> {
   doc.fontSize(20).fillColor('#14508F').text('Fisko — Reporte fiscal', { align: 'left' });
   doc.moveDown(0.3);
   doc.fontSize(10).fillColor('#555');
-  const p = summary.period;
+  // An accountant is handed this for one taxpayer and one period: both have to
+  // be on the page, or the file says nothing about whose IVA it is.
+  if (detail) {
+    doc.text(`Contribuyente: ${detail.nombre}${detail.ruc ? `  ·  RUC ${detail.ruc}` : ''}`);
+  }
+  doc.text(`Período: ${periodLabel(summary.period)}`);
   doc.text(
-    `Período: ${p.from ? p.from.slice(0, 10) : 'inicio'} a ${p.to ? p.to.slice(0, 10) : 'hoy'}  ·  ${summary.count} comprobantes`,
+    `${summary.count} comprobante(s) computables` +
+      (summary.sinOperacion > 0 ? `  ·  ${summary.sinOperacion} sin operación (notas de remisión)` : '') +
+      (summary.sinConversion > 0 ? `  ·  ${summary.sinConversion} sin tipo de cambio, fuera de los totales` : ''),
   );
   doc.moveDown(1);
 
@@ -258,13 +400,28 @@ export async function buildPdf(summary: FiscalSummary): Promise<Buffer> {
   line('Total IVA', fmtGs(summary.totalIva), true);
   doc.moveDown(0.6);
 
+  line('Exentas', fmtGs(summary.exentas));
+  line('Total del período', fmtGs(summary.totalOpe), true);
+  doc.moveDown(0.6);
+
+  doc.fontSize(13).fillColor(BRAND).text('Liquidación del IVA');
+  doc.moveDown(0.3);
+  line('IVA crédito (compras)', fmtGs(summary.ivaCredito));
+  line('IVA débito (ventas)', fmtGs(summary.ivaDebito));
+  line('Saldo a favor del período anterior', fmtGs(summary.saldoAnterior));
+  line('IVA a pagar', fmtGs(summary.ivaAPagar), true);
+  line('Saldo a favor para el período siguiente', fmtGs(summary.saldoSiguiente), true);
+  doc.moveDown(0.6);
+
   doc.fontSize(13).fillColor('#14508F').text('Resumen');
   doc.moveDown(0.3);
   line('Ventas (ingresos)', fmtGs(summary.ventas));
   line('Compras (gastos)', fmtGs(summary.compras));
-  line('IVA crédito (compras)', fmtGs(summary.ivaCredito));
-  line('IVA débito (ventas)', fmtGs(summary.ivaDebito));
-  line('IRP estimado (simplificado)', fmtGs(summary.irpEstimado), true);
+  line(
+    `${summary.rentaRegimen} estimado (simplificado)`,
+    fmtGs(summary.rentaEstimado),
+    true,
+  );
   doc.moveDown(0.6);
 
   if (summary.byCategory.length) {
@@ -282,6 +439,67 @@ export async function buildPdf(summary: FiscalSummary): Promise<Buffer> {
     for (const m of summary.byMonth) {
       line(`${m.month} (${m.count})`, `${fmtGs(m.total)} · IVA ${fmtGs(m.iva)}`);
     }
+  }
+
+  // The comprobantes behind the totals. An accountant checks a declaration
+  // against the documents, and a page of totals alone cannot be checked.
+  if (detail?.rows.length) {
+    doc.addPage();
+    doc.fontSize(13).fillColor(BRAND).text(`Detalle del período — ${periodLabel(summary.period)}`);
+    doc.moveDown(0.5);
+
+    const left = 48;
+    const width = doc.page.width - 96;
+    const cols = [
+      { w: 58, align: 'left' as const },
+      { w: 62, align: 'left' as const },
+      { w: width - 58 - 62 - 92 - 92 - 70, align: 'left' as const },
+      { w: 92, align: 'right' as const },
+      { w: 92, align: 'right' as const },
+      { w: 70, align: 'right' as const },
+    ];
+    const row = (cells: string[], bold = false, color?: string) => {
+      if (doc.y > doc.page.height - 80) {
+        doc.addPage();
+      }
+      doc.fontSize(bold ? 9.5 : 9).fillColor(color ?? (bold ? BRAND : '#000'));
+      const y = doc.y;
+      let x = left;
+      cells.forEach((c, i) => {
+        const col = cols[i] as { w: number; align: 'left' | 'right' };
+        doc.text(c, x, y, { width: col.w - 6, align: col.align, ellipsis: true, lineBreak: false });
+        x += col.w;
+      });
+      doc.y = y;
+      doc.moveDown(bold ? 0.9 : 0.75);
+    };
+
+    row(['Fecha', 'Tipo', 'Emisor / Nº', 'Total', 'En guaraníes', 'IVA'], true);
+    for (const r of detail.rows) {
+      const rate = r.moneda === 'PYG' ? 1 : num(r.tipoCambio);
+      const total = num(r.totalOpe);
+      const enGs = rate ? fmtGs(total * rate) : 'sin cambio';
+      const propio =
+        r.moneda === 'PYG'
+          ? fmtGs(total)
+          : `${r.moneda} ${total.toLocaleString('es-PY', { minimumFractionDigits: 2 })}`;
+      row([
+        fmtDay(r.fechaEmision),
+        TIPO_DOC_LABEL[r.tipoDoc] ?? `Tipo ${r.tipoDoc}`,
+        `${r.emisorNombre}${r.numeroDoc ? ` · ${r.numeroDoc}` : ''}`,
+        propio,
+        enGs,
+        rate ? fmtGs(num(r.totalIva) * rate) : '—',
+      ]);
+    }
+    doc.moveDown(0.4);
+    doc.fontSize(8).fillColor('#777').text(
+      'Los montos en moneda extranjera se convierten con el tipo de cambio que trae cada documento, ' +
+        'no con el del día de la importación.',
+      left,
+      doc.y,
+      { width },
+    );
   }
 
   if (summary.sinConversion > 0) {

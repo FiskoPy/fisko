@@ -1,7 +1,9 @@
 import type { Request, Response } from 'express';
 import type { AuthedRequest } from '../../middleware/auth';
 import { AppError } from '../../errors/app-error';
-import { importPhotoSchema, importXmlSchema, listInvoicesQuerySchema } from './invoices.schemas';
+import { importPhotoSchema, importXmlSchema, listInvoicesQuerySchema,
+  setCategoriaSchema,
+} from './invoices.schemas';
 import * as invoicesService from './invoices.service';
 
 function userId(req: AuthedRequest): string {
@@ -29,6 +31,16 @@ export async function list(req: AuthedRequest, res: Response): Promise<void> {
 
 export async function detail(req: AuthedRequest, res: Response): Promise<void> {
   const invoice = await invoicesService.getInvoice(userId(req), (req as Request).params.id as string);
+  res.status(200).json({ invoice });
+}
+
+export async function categoria(req: AuthedRequest, res: Response): Promise<void> {
+  const body = setCategoriaSchema.parse(req.body);
+  const invoice = await invoicesService.setCategoria(
+    userId(req),
+    (req as Request).params.id as string,
+    body.categoria,
+  );
   res.status(200).json({ invoice });
 }
 

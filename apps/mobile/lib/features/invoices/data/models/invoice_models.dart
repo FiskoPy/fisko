@@ -34,6 +34,10 @@ class Invoice with _$Invoice {
     String? receptorNombre,
     required DateTime fechaEmision,
     @Default('PYG') String moneda,
+    // What the invoice is filed under, and whether a person chose it.
+    @Default('otros') String categoria,
+    @Default('Otros') String categoriaLabel,
+    @Default(false) bool categoriaManual,
     // Guaraníes per unit of [moneda]. Null for a guaraní invoice, and for a
     // foreign one loaded before the reader could read its rate.
     double? tipoCambio,

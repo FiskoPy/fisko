@@ -20,6 +20,9 @@ model User {
   name          String
   ruc           String? // RUC paraguaio (sem dígito verificador)
   rucDv         Int? // dígito verificador (dDVEmi)
+  // 'fisica' | 'juridica'. A company pays IRE, a person IRP, and the report
+  // named the wrong one for an E.A.S. Null falls back to the RUC's shape.
+  tipoContribuyente String?
   googleId      String?  @unique
   emailVerified Boolean  @default(false)
   tokenVersion  Int      @default(0) // incrementado no logout para invalidar refresh tokens
@@ -92,6 +95,11 @@ model Invoice {
   source      String   @default("manual") // manual | email | ocr
   xmlRaw      String?
   createdAt   DateTime @default(now())
+
+  // Set by hand when the rules get it wrong: "CAPAZ (Sulfentrazona)" is an
+  // agricultural input, not "Otros". Null means the rules decide, so an
+  // improved ruleset still applies to everything that was never corrected.
+  categoria String?
 
   items InvoiceItem[]
 

@@ -41,6 +41,35 @@ export async function exportReport(req: AuthedRequest, res: Response): Promise<v
   }
 
   const data = await reportsService.getSummary(uid, q);
+  // Who the report is for, and the documents behind its totals: an accountant
+  // checks a declaration against them (client, 2026-09-20).
+  const [owner, rows] = await Promise.all([
+    prisma.user.findUnique({ where: { id: uid }, select: { name: true, ruc: true, rucDv: true } }),
+    prisma.invoice.findMany({
+      where: {
+        userId: uid,
+        ...(q.from || q.to
+          ? { fechaEmision: { ...(q.from ? { gte: q.from } : {}), ...(q.to ? { lte: q.to } : {}) } }
+          : {}),
+      },
+      select: {
+        fechaEmision: true,
+        tipoDoc: true,
+        emisorNombre: true,
+        numeroDoc: true,
+        moneda: true,
+        tipoCambio: true,
+        totalOpe: true,
+        totalIva: true,
+      },
+      orderBy: { fechaEmision: 'asc' },
+    }),
+  ]);
+  const detail = {
+    nombre: owner?.name ?? '',
+    ruc: owner?.ruc ? `${owner.ruc}${owner.rucDv != null ? `-${owner.rucDv}` : ''}` : null,
+    rows,
+  };
 
   if (q.format === 'excel') {
     const buf = await reportsService.buildExcel(data);
@@ -53,7 +82,7 @@ export async function exportReport(req: AuthedRequest, res: Response): Promise<v
     return;
   }
 
-  const buf = await reportsService.buildPdf(data);
+  const buf = await reportsService.buildPdf(data, detail);
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', 'attachment; filename="fisko-reporte.pdf"');
   res.status(200).send(buf);

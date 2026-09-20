@@ -9,6 +9,11 @@ export const importPhotoSchema = z.object({
   imageBase64: z.string().min(100, 'Imagen vacía'),
 });
 
+export const setCategoriaSchema = z.object({
+  /** A category key from categories.ts, or null to go back to the rules. */
+  categoria: z.string().min(2).max(40).nullable(),
+});
+
 export const listInvoicesQuerySchema = z.object({
   from: z.coerce.date().optional(),
   to: z.coerce.date().optional(),

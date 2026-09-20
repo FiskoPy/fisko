@@ -15,6 +15,8 @@ class InvoicesRepository {
   Future<InvoiceList> list({int page = 1, int pageSize = 20, DateTime? from, DateTime? to}) =>
       _run(() => _api.list(page: page, pageSize: pageSize, from: from, to: to));
   Future<Invoice> detail(String id) => _run(() => _api.detail(id));
+  Future<Invoice> setCategoria(String id, String? categoria) =>
+      _run(() => _api.setCategoria(id, categoria));
   Future<void> delete(String id) => _run(() => _api.delete(id));
 
   Future<T> _run<T>(Future<T> Function() action) async {

@@ -11,6 +11,7 @@
  */
 
 export type CategoryKey =
+  | 'insumos_agricolas'
   | 'combustible'
   | 'supermercado'
   | 'alimentacion'
@@ -43,6 +44,24 @@ export function normalizeText(v: string): string {
 // Order matters: the first definition that matches wins. More specific
 // categories are declared before broader ones.
 export const CATEGORIES: CategoryDef[] = [
+  {
+    // First, and by product name as much as by shop: the client farms, and his
+    // agrochemical invoices were all landing in "Otros" — a category tells him
+    // nothing, and the accountant reads these as insumos.
+    key: 'insumos_agricolas',
+    label: 'Insumos agrícolas',
+    patterns: [
+      // What the invoice is for.
+      /\b(agroquimic|agroquimic[oa]s?|herbicida|fungicida|insecticida|acaricida|plaguicida|pesticida|fertilizante|abono|urea|fosfato|semillas?|silo ?bolsa|inoculante|coadyuvante|adherente)\b/,
+      // Active ingredients as they are printed on a Paraguayan invoice.
+      /\b(glifosato|glyphosat|sulfentrazona|cletodim|clethodim|atrazina|paraquat|dicamba|imazetapir|haloxifop|flumioxazin|metolacloro|acetocloro|tebuconazol|azoxistrobin|mancozeb|clorpirifos|lambdacialotrina|tiametoxam|imidacloprid|bifentrina|2\s*,?\s*4\s*-?\s*d)\b/,
+      // Trade names seen on the client's own invoices.
+      /\b(acrux|acruz|tactic|diadem|capaz)\b/,
+      // The trade: a business that names itself agro sells agro.
+      /\b(agro ?(?:servicios?|insumos?|campo|centro|quimica|ciencia|tienda)|agropecuaria|agroveterinaria|semilleria|cooperativa agricola)\b/,
+      /\b(agro)\b(?=.*\b(?:s\.?a|s\.?r\.?l|e\.?a\.?s|ltda|cia)\b)/,
+    ],
+  },
   {
     // Declared first deliberately. An invoice from OCR carries no line items,
     // so the issuer's name is the only signal — which makes the order of these
