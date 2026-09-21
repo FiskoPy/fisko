@@ -43,6 +43,8 @@ void main() {
       expect(parseRate(' 6030 '), 6030);
       // Currencies quoted in a few guaraníes keep their decimals.
       expect(parseRate('3,91'), 3.91);
+      // Three decimals, as the DNIT printed a pound: both separators.
+      expect(parseRate('9.436,253'), 9436.253);
     });
 
     test('is nothing when it is not a positive number', () {

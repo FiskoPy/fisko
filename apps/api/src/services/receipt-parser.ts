@@ -707,10 +707,11 @@ const NOT_CURRENCY = /cotiza|tipo\s*de\s*cambio|cambio\s*del\s*dia|@|www\./;
  */
 const guaraniOffered = (line: string): boolean => {
   const low = norm(line);
-  // Nor as the label of a figure: "Guaraníes 6.630.712" under a dollar total.
-  return (
-    !NOT_CURRENCY.test(low) && /(?<!\ben\s{0,3})\bguarani(?!\w*\s*[:.]?\s*(?:gs\.?\s*)?\d)(?!\w*\s*:)/.test(low)
-  );
+  // A figure beside it is no sign of a stated currency: the rebuilt rows put
+  // a guaraní talonario's own total there ("Guaranies 900.000"), and read so
+  // the printed "Dólares" became the currency again. A dollar KuDE's
+  // "Guaraníes 6.630.712" is settled by its "Moneda" label (labelledCurrency).
+  return !NOT_CURRENCY.test(low) && /(?<!\ben\s{0,3})\bguarani(?!\w*\s*:)/.test(low);
 };
 
 /** The currency a "Moneda" label names — what the page states, not offers. */

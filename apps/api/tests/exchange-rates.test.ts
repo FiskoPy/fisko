@@ -45,6 +45,12 @@ describe("the DNIT's table", () => {
     );
     expect(parseDnitRates(page).get('2026-09-01|USD')).toEqual({ compra: 5909.01, venta: 5919.15 });
   });
+
+  it('reads three decimals as decimals', () => {
+    // "9.436,253": the pound's buying rate, 20-22/08/2021.
+    const page = html.replace('<td style="text-align: center;">7.993,12</td>', '<td style="text-align: center;">7.993,125</td>');
+    expect(parseDnitRates(page).get('2026-09-01|GBP')?.compra).toBe(7993.125);
+  });
 });
 
 describe('the rate for an invoice', () => {
@@ -53,6 +59,8 @@ describe('the rate for an invoice', () => {
     // which carries Friday's close.
     expect(pickRate(rates, 'USD', day('2026-08-31'), 'venta')).toEqual({
       rate: 5921.39,
+      // The buying close too, for a change of side without a second lookup.
+      other: 5915.26,
       date: '2026-08-30',
       side: 'venta',
     });
@@ -88,6 +96,12 @@ describe('the rate for an invoice', () => {
     const gap = new Map(rates);
     gap.delete('2026-08-30|USD');
     expect(pickRate(gap, 'USD', day('2026-08-31'), 'venta')).toBe('ilegible');
+  });
+
+  it('does not take a close far from the days around it — a typo in the table', () => {
+    const typo = new Map(rates);
+    typo.set('2026-08-30|USD', { compra: 5_915_260, venta: 5_921_390 });
+    expect(pickRate(typo, 'USD', day('2026-08-31'), 'venta')).toBe('ilegible');
   });
 
   it("says so when the DNIT's page cannot be read", async () => {

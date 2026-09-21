@@ -79,6 +79,10 @@ model Invoice {
   // the close the law names (Decreto 3107/2019, art. 13), or "manual". Null
   // means the invoice printed its own rate.
   tipoCambioFuente String?
+  // For a "dnit" rate, the same day's close on the other side (buying if
+  // tipoCambio is the selling one): a change of ledger side swaps the two,
+  // without asking the DNIT's site again.
+  tipoCambioOtroLado Decimal? @db.Decimal(18, 6)
   // Totais (gTotSub)
   totalOpe   Decimal @db.Decimal(18, 4) // dTotGralOpe
   totalIva   Decimal @db.Decimal(18, 4) // dTotIVA

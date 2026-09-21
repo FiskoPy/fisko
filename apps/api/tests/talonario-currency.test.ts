@@ -263,44 +263,66 @@ describe('neither currency on the model saying so alone', () => {
     expect(decidePhoto(parsed, brl, blocks, OWN_RUC, [rows])).toMatchObject({ kind: 'refuse', detail: 'choice' });
   });
 
-  // Cevelio's form re-figured: Gs 1.100.000, IVA 100.000 — a total a dollar
-  // amount would divide the same.
-  const gs1100000 = (s: string, words: string) =>
+  // Cevelio's form re-figured for another total and IVA.
+  const refigured = (s: string, total: string, iva: string, words: string) =>
     s
-      .replace(/1900\.000/g, '1.100.000')
-      .replace(/900\.000/g, '1.100.000')
-      .replace(/81,818/g, '100.000')
+      .replace(/1900\.000/g, total)
+      .replace(/900\.000/g, total)
+      .replace(/81,818/g, iva)
       .replace(/Novecientos mil/g, words);
-  const invoice: Extraction = {
+  const invoiceOf = (total: number, iva: number): Extraction => ({
     ...aiFixture('cevelio-manuscrita'),
-    total: 1_100_000,
-    gravada10: 1_100_000,
-    iva10: 100_000,
-    totalIva: 100_000,
-    items: [{ ...aiFixture('cevelio-manuscrita').items[0]!, precioUnitario: 1_100_000, total: 1_100_000 }],
-  };
+    total,
+    gravada10: total,
+    iva10: iva,
+    totalIva: iva,
+    items: [{ ...aiFixture('cevelio-manuscrita').items[0]!, precioUnitario: total, total }],
+  });
+  // Gs 1.000.000: its IVA, 90.909,09, rounded to the guaraní.
+  const million = invoiceOf(1_000_000, 90_909);
 
   it('keeps guaraníes written out "con 00/100", or on a form that prints "centavos"', () => {
     for (const [how, words] of [
-      ['con 00/100', 'Un millon cien mil con 00/100'],
-      ['centavos', 'Un millon cien mil centavos'],
+      ['con 00/100', 'Un millon con 00/100'],
+      ['centavos', 'Un millon centavos'],
     ]) {
-      const blocks = gs1100000(text('cevelio-manuscrita-blocks'), words as string);
-      const rows = gs1100000(text('cevelio-manuscrita-rows'), words as string);
-      const decision = decide(blocks, rows, invoice);
+      const blocks = refigured(text('cevelio-manuscrita-blocks'), '1.000.000', '90,909', words as string);
+      const rows = refigured(text('cevelio-manuscrita-rows'), '1.000.000', '90,909', words as string);
+      const decision = decide(blocks, rows, million);
       expect(`${how}: ${decision.kind === 'store' ? (decision.reading.foreignCurrency ?? 'PYG') : decision.kind}`).toBe(
         `${how}: PYG`,
       );
       // Said in dollars, it is not taken: nothing printed has cents.
-      expect(decide(blocks, rows, { ...invoice, moneda: 'USD' })).toMatchObject({ kind: 'refuse' });
+      expect(decide(blocks, rows, { ...million, moneda: 'USD' })).toMatchObject({ kind: 'refuse' });
+    }
+  });
+
+  it('does not take guaraníes an exact IVA leaves open: "20.000 más IVA" reads the same in dollars', () => {
+    // USD 22.000 with an IVA of 2.000 — a land rent — or Gs 22.000: the
+    // figures are the same, and the model's missed tick would file some Gs
+    // 130 million as 22.000. Nor Gs 1.100.000 and 100.000, for the same reason.
+    for (const [total, iva, printed, printedIva, words] of [
+      [22_000, 2_000, '22.000', '2.000', 'Veintidos mil'],
+      [1_100_000, 100_000, '1.100.000', '100.000', 'Un millon cien mil'],
+    ] as const) {
+      const blocks = refigured(text('cevelio-manuscrita-blocks'), printed, printedIva, words);
+      const rows = refigured(text('cevelio-manuscrita-rows'), printed, printedIva, words);
+      expect(decide(blocks, rows, invoiceOf(total, iva))).toMatchObject({ kind: 'refuse', reason: 'moneda' });
     }
   });
 
   it('does not take a rate the model worked out for evidence of dollars', () => {
-    const blocks = gs1100000(text('cevelio-manuscrita-blocks'), 'Un millon cien mil');
-    const rows = gs1100000(text('cevelio-manuscrita-rows'), 'Un millon cien mil');
-    const computed = { ...invoice, moneda: 'USD' as const, tipoCambio: 5950, totalEnGuaranies: 1_100_000 * 5950 };
+    const blocks = refigured(text('cevelio-manuscrita-blocks'), '1.000.000', '90,909', 'Un millon');
+    const rows = refigured(text('cevelio-manuscrita-rows'), '1.000.000', '90,909', 'Un millon');
+    const computed = { ...million, moneda: 'USD' as const, tipoCambio: 5950, totalEnGuaranies: 1_000_000 * 5950 };
     expect(decide(blocks, rows, computed)).toMatchObject({ kind: 'refuse' });
+  });
+
+  it('does not read "Guaranies" with a figure beside it as a dollar invoice stated', () => {
+    // The rebuilt rows can put a guaraní talonario's total beside the printed
+    // option: that is still the form's choice, not "Dólares" stated.
+    const rows = text('cevelio-manuscrita-rows').replace(/^Guaranies$/m, 'Guaranies 900.000');
+    expect(parseReceipt(rows)).toMatchObject({ foreignCurrency: null, currencyChoice: 'USD' });
   });
 
   it('never lets a printed choice override a currency a "Moneda" label states', () => {
@@ -355,10 +377,45 @@ describe('the issuer, never the buyer', () => {
     });
     const decision = decidePhoto(parsed, model, ticket, OWN_RUC);
     if (decision.kind === 'store') expect(decision.reading.emisorRuc).not.toBe(OWN_RUC);
-    // Even a parser that did read the buyer as the issuer is not taken at it.
-    const asIssuer = { ...parsed, emisorRuc: OWN_RUC, emisorDv: 8 };
-    const again = decidePhoto(asIssuer, model, ticket, OWN_RUC);
-    if (again.kind === 'store') expect(again.reading.emisorRuc).not.toBe(OWN_RUC);
+  });
+
+  it("files the user's own paper sale as a sale", () => {
+    // A talonario TEC BIO issued: its RUC printed as the issuer's, the
+    // customer's in the customer block. The model, told the user buys, turns
+    // the parties round — the parser's reading of the page keeps them.
+    const sale = [
+      'TEC BIO E.A.S.',
+      'RUC: 80175384-8',
+      'TIMBRADO N° 16912345',
+      'FACTURA N° 001-001-0000123',
+      'Fecha de Emisión: 01/09/2026',
+      'Nombre o Razón Social: AGRO CLIENTE S.A.',
+      'RUC: 80054993-7',
+      '1 Servicio técnico 1.000.000',
+      'TOTAL A PAGAR 1.000.000',
+      'LIQUIDACIÓN DEL IVA: (5%) 0 (10%) 90.909 TOTAL IVA: 90.909',
+    ].join('\n');
+    const parsed = parseReceipt(sale);
+    expect(parsed.emisorRuc).toBe(OWN_RUC);
+    const model = fromExtraction({
+      ...aiFixture('cevelio-manuscrita'),
+      emisorNombre: 'TEC BIO E.A.S.',
+      emisorRuc: OWN_RUC,
+      emisorDv: 8,
+      receptorNombre: 'AGRO CLIENTE S.A.',
+      receptorRuc: '80054993',
+      timbrado: '16912345',
+      numeroDoc: '001-001-0000123',
+      fecha: '2026-09-01',
+      total: 1_000_000,
+      gravada10: 1_000_000,
+      iva10: 90_909,
+      totalIva: 90_909,
+      items: [],
+    });
+    const decision = decidePhoto(parsed, model, sale, OWN_RUC);
+    expect(decision.kind).toBe('store');
+    if (decision.kind === 'store') expect(decision.reading.emisorRuc).toBe(OWN_RUC);
   });
 
   it("does not file the buyer's name as the seller's", () => {

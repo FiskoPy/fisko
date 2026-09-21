@@ -23,6 +23,8 @@ export type RateSide = 'compra' | 'venta';
 
 export interface OfficialRate {
   rate: number;
+  /** The same close on the other side — kept so a change of side needs no second lookup. */
+  other: number;
   /** The day whose close it is, YYYY-MM-DD: the day before the invoice. */
   date: string;
   side: RateSide;
@@ -66,16 +68,21 @@ const cellsOf = (row: string): string[] =>
   );
 
 /**
- * "5.921,39" → 5921.39 — and "7,299.26", the way the DNIT wrote a few days
- * (15-17/03/2024, 31/05/2021, 29/07-02/08/2020): the last separator with one
- * or two digits after it is the decimal point.
+ * "5.921,39" → 5921.39, the DNIT's own way — also with three decimals,
+ * "9.436,253" (GBP, 20-22/08/2021) — and "7,299.26", the way it wrote a few
+ * days (15-17/03/2024, 31/05/2021, 29/07-02/08/2020). With both separators
+ * the last one is the decimal point; a comma alone is one; a point alone is
+ * one unless three digits follow it, which is grouping.
  */
 const rateOf = (cell: string | undefined): number | null => {
   const s = cell?.trim() ?? '';
   if (!/^\d[\d.,]*$/.test(s)) return null;
-  const decimal = s.match(/[.,](\d{1,2})$/);
-  const whole = (decimal ? s.slice(0, -decimal[0].length) : s).replace(/[.,]/g, '');
-  const n = Number(decimal ? `${whole}.${decimal[1]}` : whole);
+  const comma = s.lastIndexOf(',');
+  const point = s.lastIndexOf('.');
+  const decimalAt =
+    comma >= 0 && point >= 0 ? Math.max(comma, point) : comma >= 0 ? comma : point >= 0 && !/\.\d{3}$/.test(s) ? point : -1;
+  const whole = (decimalAt >= 0 ? s.slice(0, decimalAt) : s).replace(/[.,]/g, '');
+  const n = Number(decimalAt >= 0 ? `${whole}.${s.slice(decimalAt + 1)}` : whole);
   return Number.isFinite(n) && n > 0 ? n : null;
 };
 
@@ -186,16 +193,41 @@ export function pickRate(
   const want = dayBefore(issued);
   const date = ymdOf(want);
 
-  if (date <= last) {
-    const row = rates.get(`${date}|${currency}`);
-    return row ? { rate: row[side], date, side } : 'ilegible';
+  let from = date;
+  if (date > last) {
+    for (let day = want; ymdOf(day) > last; day = dayBefore(day)) {
+      const weekday = day.getUTCDay();
+      if (weekday !== 0 && weekday !== 6) return 'pendiente';
+    }
+    from = last;
   }
-  for (let day = want; ymdOf(day) > last; day = dayBefore(day)) {
-    const weekday = day.getUTCDay();
-    if (weekday !== 0 && weekday !== 6) return 'pendiente';
+  const row = rates.get(`${from}|${currency}`);
+  if (!row || !likeItsNeighbours(rates, currency, from, row)) return 'ilegible';
+  return { rate: row[side], other: row[side === 'compra' ? 'venta' : 'compra'], date, side };
+}
+
+/**
+ * Whether a day's rates sit near the closest other day's: the DNIT's own
+ * table has typos, and one read a thousand times over would go straight
+ * into the IVA. A close moves a few percent at most from one day to the
+ * next; with no neighbour within a week there is nothing to hold it to.
+ */
+function likeItsNeighbours(
+  rates: DayRates,
+  currency: string,
+  ymd: string,
+  row: { compra: number; venta: number },
+): boolean {
+  const at = new Date(`${ymd}T00:00:00.000Z`).getTime();
+  for (let d = 1; d <= 7; d++) {
+    for (const t of [at - d * 86_400_000, at + d * 86_400_000]) {
+      const near = rates.get(`${ymdOf(new Date(t))}|${currency}`);
+      if (!near) continue;
+      const close = (a: number, b: number) => Math.abs(a / b - 1) <= 0.2;
+      return close(row.compra, near.compra) && close(row.venta, near.venta);
+    }
   }
-  const row = rates.get(`${last}|${currency}`);
-  return row ? { rate: row[side], date, side } : 'ilegible';
+  return true;
 }
 
 /** The official close for an invoice, or why there is none. */

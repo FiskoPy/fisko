@@ -805,6 +805,23 @@ function foreignShown(r: ParsedReceipt, text: string): boolean {
 const LEAST_GUARANIES_ON_A_CHOICE = 20_000;
 
 /**
+ * Whether an IVA on this reading was rounded to the guaraní: a gravada read
+ * off the page that its rate does not divide — Gs 900.000 carries 81.818,18
+ * of IVA, printed 81.818. A dollar invoice priced "20.000 más IVA" divides
+ * exactly (22.000 and 2.000) and reads the same in guaraníes, so an exact
+ * division says nothing either way. An IVA the model worked out is no
+ * evidence of anything.
+ */
+function guaraniRounding(r: ParsedReceipt): boolean {
+  return ([5, 10] as const).some((rate) => {
+    const g = r[`gravada${rate}`];
+    const iva = r[`iva${rate}`];
+    if (g == null || iva == null || iva <= 0 || r.derived.includes(`gravada${rate}`)) return false;
+    return Number.isInteger(g) && g % (rate === 10 ? 11 : 21) !== 0;
+  });
+}
+
+/**
  * The parser's reading in the currency the model saw ticked, where the form
  * only offers it — or 'open' when nothing settles it.
  *
@@ -812,9 +829,12 @@ const LEAST_GUARANIES_ON_A_CHOICE = 20_000;
  * hold in the currency it gave. Dollars need the page to show something a
  * guaraní amount cannot have; the parser's figures are read the guaraní way
  * and must never go on record as dollars on the model's say-so. Guaraníes need
- * a total a dollar invoice of the same figures is not — the model missed the
- * tick on a dollar receipt once already. And the currency has to be one the
- * form offers. With no model there is nothing to say which box is ticked.
+ * what a dollar invoice of the same figures is not: an IVA rounded to the
+ * guaraní, on a total past the smallest — the model missed the tick on a
+ * dollar receipt once already, and USD 22.000 "20.000 más IVA" filed as Gs
+ * 22.000 would put some Gs 130 million beside the wrong figure. And the
+ * currency has to be one the form offers. With no model there is nothing to
+ * say which box is ticked.
  */
 function choiceSettled(
   ocr: ParsedReceipt | null,
@@ -825,20 +845,10 @@ function choiceSettled(
   if (!model || !amountsSound(model)) return 'open';
   const chosen = model.foreignCurrency;
   if (chosen != null && (chosen !== ocr.currencyChoice || !foreignShown(model, text))) return 'open';
-  if (chosen == null && (model.total ?? 0) < LEAST_GUARANIES_ON_A_CHOICE) return 'open';
+  if (chosen == null && ((model.total ?? 0) < LEAST_GUARANIES_ON_A_CHOICE || !guaraniRounding(model))) {
+    return 'open';
+  }
   return { ...ocr, foreignCurrency: chosen, currencyChoice: null };
-}
-
-/**
- * The parser's reading without an issuer that is the user. The user is the
- * buyer of what he photographs (see witnessed), and the parser, skipping an
- * issuer's RUC it misread, could take the next one in the header — the
- * customer block's — and file a purchase as a sale, its IVA moved from credit
- * to debit. A CDC would settle it; a paper invoice has none.
- */
-function buyerAsIssuerDropped(ocr: ParsedReceipt | null, ownRuc: string | null): ParsedReceipt | null {
-  if (!ocr || !ownRuc || ocr.cdc || ocr.emisorRuc !== ownRuc) return ocr;
-  return recounted({ ...ocr, emisorRuc: null, emisorDv: null, emisorNombre: null });
 }
 
 /** What one reader saw that the other's amounts cannot overrule. */
@@ -872,11 +882,10 @@ export function decidePhoto(
   ownRuc: string | null = null,
   rows: string[] = [],
 ): PhotoDecision {
-  const parsed = buyerAsIssuerDropped(ocrRead, ownRuc);
-  const ai = aiRead ? witnessed(aiRead, text, ownRuc, parsed, rows) : null;
-  const settled = choiceSettled(parsed, ai?.reading ?? null, text);
+  const ai = aiRead ? witnessed(aiRead, text, ownRuc, ocrRead, rows) : null;
+  const settled = choiceSettled(ocrRead, ai?.reading ?? null, text);
   if (settled === 'open') {
-    return { kind: 'refuse', reason: 'moneda', reading: ai?.reading ?? parsed, detail: 'choice' };
+    return { kind: 'refuse', reason: 'moneda', reading: ai?.reading ?? ocrRead, detail: 'choice' };
   }
   const ocr = settled;
   const texts = [text, ...rows.filter((t) => t && t !== text)];

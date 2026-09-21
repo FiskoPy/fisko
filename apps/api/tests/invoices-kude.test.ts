@@ -311,14 +311,16 @@ describe('a photo of an invoice in dollars that prints no rate', () => {
     expect(res.body.missing).toContain('Tipo de cambio (cotización DNIT del 17/08/2026)');
   });
 
-  it("changes side with the DNIT's site down, and keeps the rate it has", async () => {
+  it("changes side with the DNIT's site down, at the other close it kept", async () => {
     const { id } = await prisma.invoice.findFirstOrThrow({ where: { userId } });
     resetRatesCache(); // nothing read, and the site unreachable (DNIT_RATES=off)
     try {
+      // A sale: the buying close of 17/08, stored beside the selling one.
       const res = await patch(id, 'tipo', { tipo: 'venta' });
       expect(res.status).toBe(200);
-      expect(res.body.invoice).toMatchObject({ tipo: 'venta', tipoCambio: 6037.48 });
-      await patch(id, 'tipo', { tipo: null });
+      expect(res.body.invoice).toMatchObject({ tipo: 'venta', tipoCambio: 6027.92, tipoCambioFuente: 'dnit' });
+      const back = await patch(id, 'tipo', { tipo: null });
+      expect(back.body.invoice).toMatchObject({ tipo: 'compra', tipoCambio: 6037.48 });
     } finally {
       resetRatesCache(
         parseDnitRates(readFileSync(join(__dirname, 'fixtures', 'dnit', 'cotizaciones-2026.html'), 'utf8')),

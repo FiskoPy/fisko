@@ -488,7 +488,8 @@ export async function setCategoria(
  * Files an invoice as a sale or a purchase, or back under the RUC (null).
  *
  * A DNIT rate follows the side: a purchase is converted at the selling rate
- * and a sale at the buying one.
+ * and a sale at the buying one — the other close was kept with it, so the
+ * side is the person's to correct whatever the DNIT's site is doing.
  */
 export async function setTipo(
   userId: string,
@@ -499,15 +500,22 @@ export async function setTipo(
   if (!invoice) throw AppError.notFound('Factura no encontrada');
   const ownRuc = await ownRucOf(userId);
   const esVenta = tipo == null ? null : tipo === 'venta';
-  let rate: { tipoCambio: number } | Record<string, never> = {};
-  if (invoice.tipoCambioFuente === 'dnit') {
-    const side = ledgerSideOf({ emisorRuc: invoice.emisorRuc, esVenta }, ownRuc).tipo;
-    // The side is the person's to correct whatever the DNIT's site is doing:
-    // with the page down, the rate stays as it was and the side changes.
-    try {
-      rate = { tipoCambio: (await dnitRate(invoice.moneda, invoice.fechaEmision, side)).rate };
-    } catch (err) {
-      logger.warn({ err: (err as Error).message }, 'set-tipo: DNIT rate kept, not recomputed');
+  let rate: { tipoCambio: number | Prisma.Decimal; tipoCambioOtroLado: number | Prisma.Decimal } | Record<string, never> =
+    {};
+  const before = ledgerSideOf(invoice, ownRuc).tipo;
+  const after = ledgerSideOf({ emisorRuc: invoice.emisorRuc, esVenta }, ownRuc).tipo;
+  if (invoice.tipoCambioFuente === 'dnit' && before !== after) {
+    if (invoice.tipoCambio != null && invoice.tipoCambioOtroLado != null) {
+      rate = { tipoCambio: invoice.tipoCambioOtroLado, tipoCambioOtroLado: invoice.tipoCambio };
+    } else {
+      // Stored before both closes were kept: ask the DNIT. With its page
+      // down the rate stays as it was, and the side still changes.
+      try {
+        const found = await dnitRate(invoice.moneda, invoice.fechaEmision, after);
+        rate = { tipoCambio: found.rate, tipoCambioOtroLado: found.other };
+      } catch (err) {
+        logger.warn({ err: (err as Error).message }, 'set-tipo: DNIT rate kept, not recomputed');
+      }
     }
   }
   const updated = await prisma.invoice.update({
@@ -537,15 +545,13 @@ export async function setTipoCambio(
     );
   }
   const ownRuc = await ownRucOf(userId);
-  const data =
-    tipoCambio != null
-      ? { tipoCambio, tipoCambioFuente: 'manual' }
-      : {
-          tipoCambio: (
-            await dnitRate(invoice.moneda, invoice.fechaEmision, ledgerSideOf(invoice, ownRuc).tipo)
-          ).rate,
-          tipoCambioFuente: 'dnit',
-        };
+  let data: { tipoCambio: number; tipoCambioOtroLado: number | null; tipoCambioFuente: string };
+  if (tipoCambio != null) {
+    data = { tipoCambio, tipoCambioOtroLado: null, tipoCambioFuente: 'manual' };
+  } else {
+    const found = await dnitRate(invoice.moneda, invoice.fechaEmision, ledgerSideOf(invoice, ownRuc).tipo);
+    data = { tipoCambio: found.rate, tipoCambioOtroLado: found.other, tipoCambioFuente: 'dnit' };
+  }
   const updated = await prisma.invoice.update({ where: { id }, data, include: { items: true } });
   return toPublicInvoice(updated, ownRuc);
 }
@@ -626,10 +632,12 @@ export async function importPhoto(userId: string, imageBase64: string) {
   const missing = [...parsed.missing];
   let tipoCambio = parsed.tipoCambio;
   let tipoCambioFuente: string | null = null;
+  let tipoCambioOtroLado: number | null = null;
   if (parsed.foreignCurrency && tipoCambio == null) {
     const side = ledgerSideOf({ emisorRuc: parsed.emisorRuc ?? '' }, ownRuc).tipo;
     const official = await dnitRate(parsed.foreignCurrency, fechaEmision, side);
     tipoCambio = official.rate;
+    tipoCambioOtroLado = official.other;
     tipoCambioFuente = 'dnit';
     const [y, m, d] = official.date.split('-');
     missing.push(`Tipo de cambio (cotización DNIT del ${d}/${m}/${y})`);
@@ -690,6 +698,7 @@ export async function importPhoto(userId: string, imageBase64: string) {
       moneda: parsed.foreignCurrency ?? 'PYG',
       tipoCambio,
       tipoCambioFuente,
+      tipoCambioOtroLado,
       timbrado: parsed.timbrado,
       numeroDoc: parsed.numeroDoc,
       totalOpe: total,
