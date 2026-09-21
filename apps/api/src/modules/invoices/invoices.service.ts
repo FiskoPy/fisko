@@ -690,8 +690,9 @@ function refusePhoto(
       // month's IVA.
       logger.warn(context, 'import-photo: no date found in OCR text');
       throw AppError.badRequest(
-        'No pudimos leer la fecha de la factura. Sacá la foto de nuevo, que se vea ' +
-          'bien la fecha de emisión.',
+        'Leímos los montos, pero no pudimos confirmar la fecha de emisión. Sacá la foto ' +
+          'de nuevo con la fecha bien visible y sin sombra — en un talonario escrito a ' +
+          'mano, que se lean el día, el mes y el año.',
       );
 
     case 'lecturas':

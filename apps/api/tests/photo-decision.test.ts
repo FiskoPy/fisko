@@ -310,6 +310,17 @@ describe('the model alone is held to what Vision saw', () => {
     });
   });
 
+  it('blames the field that actually stopped it, not the parser', () => {
+    // The model read the amounts and they are all in the text; only its date
+    // could not be confirmed. Saying "no pudimos leer el total" sent the user
+    // to re-photograph the half of the page that had been read fine.
+    const unconfirmedDate = fromExtraction(answer({ fecha: '2026-02-20' }));
+    const parsed = parseReceipt(TEXT);
+    expect(parsed.total).toBeNull();
+    const decision = decidePhoto(parsed, unconfirmedDate, TEXT, BUYER);
+    expect(decision).toMatchObject({ kind: 'refuse', reason: 'fecha', detail: 'ai:fecha' });
+  });
+
   it('refuses amounts the text does not show, however well they add up', () => {
     const invented = answer({ total: 240_000, gravada10: 206_500, iva10: 18_773, totalIva: 20_368 });
     const reading = fromExtraction(invented);

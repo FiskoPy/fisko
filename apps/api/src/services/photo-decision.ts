@@ -516,11 +516,21 @@ export function decidePhoto(
   // of a refusal could not be told apart from the model never answering —
   // the client retried a handwritten talonario twice and we could not say
   // which rule turned it down (2026-09-20).
+  const aiRefusal = ai ? refusalOf(ai.reading) : null;
   const aiState =
-    ai == null ? 'none' : aiSound ? (ai.seen ? 'sound' : 'unseen') : (refusalOf(ai.reading) ?? 'none');
+    ai == null ? 'none' : aiSound ? (ai.seen ? 'sound' : 'unseen') : (aiRefusal ?? 'none');
+  // Which reading gets to explain itself. When the model's figures hold and
+  // only one field stopped it, that field is what went wrong — telling the
+  // user "no pudimos leer el total" about an invoice whose total we read, and
+  // whose date we could not confirm, sends him to photograph the wrong half
+  // of the page (Cevelio, 2026-09-20).
+  const reason =
+    ai != null && aiRefusal != null && amountsSound(ai.reading) && ocr?.total == null
+      ? aiRefusal
+      : ((basis && refusalOf(basis)) ?? 'total');
   return {
     kind: 'refuse',
-    reason: (basis && refusalOf(basis)) ?? 'total',
+    reason,
     reading: basis,
     detail: `ai:${aiState}`,
   };
