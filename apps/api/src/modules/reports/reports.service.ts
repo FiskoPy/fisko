@@ -534,7 +534,8 @@ export async function buildPdf(summary: FiscalSummary, detail?: ReportDetail): P
     doc.moveDown(0.4);
     doc.fontSize(8).fillColor('#777').text(
       'Los montos en moneda extranjera se convierten con el tipo de cambio que trae cada documento, ' +
-        'no con el del día de la importación.',
+        'no con el del día de la importación. Si el documento no lo trae, con la cotización de la ' +
+        'DNIT del día anterior a su emisión (Decreto 3107/2019, art. 13), o con el cargado a mano.',
       left,
       doc.y,
       { width },
