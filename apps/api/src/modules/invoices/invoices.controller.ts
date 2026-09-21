@@ -1,8 +1,12 @@
 import type { Request, Response } from 'express';
 import type { AuthedRequest } from '../../middleware/auth';
 import { AppError } from '../../errors/app-error';
-import { importPhotoSchema, importXmlSchema, listInvoicesQuerySchema,
+import {
+  importPhotoSchema,
+  importXmlSchema,
+  listInvoicesQuerySchema,
   setCategoriaSchema,
+  setTipoSchema,
 } from './invoices.schemas';
 import * as invoicesService from './invoices.service';
 
@@ -40,6 +44,16 @@ export async function categoria(req: AuthedRequest, res: Response): Promise<void
     userId(req),
     (req as Request).params.id as string,
     body.categoria,
+  );
+  res.status(200).json({ invoice });
+}
+
+export async function tipo(req: AuthedRequest, res: Response): Promise<void> {
+  const body = setTipoSchema.parse(req.body);
+  const invoice = await invoicesService.setTipo(
+    userId(req),
+    (req as Request).params.id as string,
+    body.tipo,
   );
   res.status(200).json({ invoice });
 }

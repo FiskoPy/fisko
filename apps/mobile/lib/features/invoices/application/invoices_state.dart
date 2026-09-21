@@ -5,6 +5,7 @@ class InvoicesState {
     this.invoices = const [],
     this.total = 0,
     this.period,
+    this.tipo,
     this.isLoading = false,
     this.isImporting = false,
     this.errorMessage,
@@ -17,6 +18,10 @@ class InvoicesState {
   /// The month being shown, as its first day (UTC), or null for every month.
   /// A closing is by month, and the list used to mix them.
   final DateTime? period;
+
+  /// 'venta', 'compra', or null for both. The IVA of a sale is debito and the
+  /// IVA of a purchase is credito; they are never one figure.
+  final String? tipo;
   final bool isLoading;
   final bool isImporting;
   final String? errorMessage;
@@ -26,6 +31,8 @@ class InvoicesState {
     List<Invoice>? invoices,
     int? total,
     DateTime? period,
+    String? tipo,
+    bool allTipos = false,
     bool allMonths = false,
     bool? isLoading,
     bool? isImporting,
@@ -37,6 +44,7 @@ class InvoicesState {
       invoices: invoices ?? this.invoices,
       total: total ?? this.total,
       period: allMonths ? null : (period ?? this.period),
+      tipo: allTipos ? null : (tipo ?? this.tipo),
       isLoading: isLoading ?? this.isLoading,
       isImporting: isImporting ?? this.isImporting,
       errorMessage: clearMessages ? null : (errorMessage ?? this.errorMessage),

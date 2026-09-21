@@ -34,6 +34,7 @@ class InvoicesController extends Notifier<InvoicesState> {
         pageSize: 100,
         from: p,
         to: p == null ? null : DateTime.utc(p.year, p.month + 1, 0),
+        tipo: state.tipo,
       );
       state = state.copyWith(isLoading: false, invoices: res.items, total: res.total);
     } on Failure catch (f) {
@@ -46,6 +47,12 @@ class InvoicesController extends Notifier<InvoicesState> {
   /// and the reports read the same provider.
   void setPeriod(DateTime? month) {
     ref.read(reportMonthProvider.notifier).state = month;
+  }
+
+  /// Shows only sales, only purchases, or both.
+  Future<void> setTipo(String? tipo) async {
+    state = state.copyWith(tipo: tipo, allTipos: tipo == null);
+    await load();
   }
 
   /// Imports a DTE XML. Returns true on success.

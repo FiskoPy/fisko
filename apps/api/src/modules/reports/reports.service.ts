@@ -98,11 +98,20 @@ async function creditCarriedInto(userId: string, from: Date, userRuc: string | n
       fechaEmision: true,
       totalIva: true,
       emisorRuc: true,
+      esVenta: true,
       moneda: true,
       tipoCambio: true,
     },
     orderBy: { fechaEmision: 'asc' },
-  })) as { tipoDoc: number; fechaEmision: Date; totalIva: unknown; emisorRuc: string; moneda: string; tipoCambio: unknown }[];
+  })) as {
+    tipoDoc: number;
+    fechaEmision: Date;
+    totalIva: unknown;
+    emisorRuc: string;
+    esVenta: boolean | null;
+    moneda: string;
+    tipoCambio: unknown;
+  }[];
 
   const months = new Map<string, { credito: number; debito: number }>();
   for (const r of rows) {
@@ -112,7 +121,8 @@ async function creditCarriedInto(userId: string, from: Date, userRuc: string | n
     const iva = num(r.totalIva) * rate * sign;
     const key = r.fechaEmision.toISOString().slice(0, 7);
     const b = months.get(key) ?? { credito: 0, debito: 0 };
-    if (userRuc != null && normalizeRuc(r.emisorRuc) === userRuc) b.debito += iva;
+    const venta = r.esVenta ?? (userRuc != null && normalizeRuc(r.emisorRuc) === userRuc);
+    if (venta) b.debito += iva;
     else b.credito += iva;
     months.set(key, b);
   }
@@ -136,6 +146,7 @@ type Row = {
   baseGrav10: unknown;
   exentas: unknown;
   categoria: string | null;
+  esVenta: boolean | null;
   emisorRuc: string;
   emisorNombre: string;
   moneda: string;
@@ -182,6 +193,7 @@ export async function getSummary(userId: string, period: ReportPeriod): Promise<
       baseGrav10: true,
       exentas: true,
       categoria: true,
+      esVenta: true,
       emisorRuc: true,
       emisorNombre: true,
       moneda: true,
@@ -237,7 +249,7 @@ export async function getSummary(userId: string, period: ReportPeriod): Promise<
     sum.baseGrav10 += num(r.baseGrav10) * k;
     sum.exentas += num(r.exentas) * k;
 
-    const isVenta = userRuc != null && normalizeRuc(r.emisorRuc) === userRuc;
+    const isVenta = r.esVenta ?? (userRuc != null && normalizeRuc(r.emisorRuc) === userRuc);
     if (isVenta) {
       sum.ventas += totalOpe;
       sum.ivaDebito += totalIva;

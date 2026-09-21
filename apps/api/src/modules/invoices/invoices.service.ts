@@ -60,6 +60,13 @@ export interface PublicInvoice {
   baseGrav5: number;
   baseGrav10: number;
   exentas: number;
+  /**
+   * Which side of the IVA this is: a sale of the taxpayer's own (débito
+   * fiscal) or a purchase (crédito fiscal computable). DNIT keeps them apart
+   * and so must the screen — they cannot be added into one IVA figure.
+   */
+  tipo: 'venta' | 'compra';
+  tipoManual: boolean;
   /** The category: the one set by hand, or the one the rules derive. */
   categoria: string;
   categoriaLabel: string;
@@ -97,7 +104,25 @@ function categoryOf(inv: Invoice & { items?: InvoiceItem[] }): {
   return { categoria: key, categoriaLabel: categoryLabel(key), categoriaManual: manual != null };
 }
 
-export function toPublicInvoice(inv: Invoice & { items?: InvoiceItem[] }): PublicInvoice {
+/**
+ * Sale or purchase, by the taxpayer's own RUC: issuer is the taxpayer means a
+ * sale. A correction stored on the invoice wins — the reader cannot always
+ * tell, and the person can.
+ */
+export function ledgerSideOf(
+  inv: { emisorRuc: string; esVenta?: boolean | null },
+  ownRuc: string | null,
+): { tipo: 'venta' | 'compra'; tipoManual: boolean } {
+  if (inv.esVenta != null) return { tipo: inv.esVenta ? 'venta' : 'compra', tipoManual: true };
+  const own = ownRuc ? normalizeRuc(ownRuc) : null;
+  const venta = own != null && normalizeRuc(inv.emisorRuc) === own;
+  return { tipo: venta ? 'venta' : 'compra', tipoManual: false };
+}
+
+export function toPublicInvoice(
+  inv: Invoice & { items?: InvoiceItem[] },
+  ownRuc: string | null = null,
+): PublicInvoice {
   return {
     id: inv.id,
     cdc: inv.cdc,
@@ -122,6 +147,7 @@ export function toPublicInvoice(inv: Invoice & { items?: InvoiceItem[] }): Publi
     baseGrav10: n(inv.baseGrav10),
     exentas: n(inv.exentas),
     ...categoryOf(inv),
+    ...ledgerSideOf(inv, ownRuc),
     originalCdc: inv.originalCdc,
     source: inv.source,
     createdAt: inv.createdAt,
@@ -308,6 +334,8 @@ export async function importXml(
 }
 
 export interface ListInvoicesQuery {
+  /** One side of the ledger — sales or purchases — or both when absent. */
+  tipo?: 'venta' | 'compra';
   from?: Date;
   to?: Date;
   tipoDoc?: number;
@@ -316,12 +344,30 @@ export interface ListInvoicesQuery {
 }
 
 export async function listInvoices(userId: string, q: ListInvoicesQuery) {
+  const owner = await prisma.user.findUnique({ where: { id: userId }, select: { ruc: true } });
+  const ownRuc = owner?.ruc ? normalizeRuc(owner.ruc) : null;
+
+  // "Ventas" are the invoices this taxpayer issued; everything else is a
+  // purchase. A correction on the invoice overrides the RUC either way.
+  const side: Prisma.InvoiceWhereInput =
+    q.tipo === 'venta'
+      ? { OR: [{ esVenta: true }, ...(ownRuc ? [{ esVenta: null, emisorRuc: ownRuc }] : [])] }
+      : q.tipo === 'compra'
+        ? {
+            OR: [
+              { esVenta: false },
+              { esVenta: null, ...(ownRuc ? { NOT: { emisorRuc: ownRuc } } : {}) },
+            ],
+          }
+        : {};
+
   const where: Prisma.InvoiceWhereInput = {
     userId,
     ...(q.tipoDoc ? { tipoDoc: q.tipoDoc } : {}),
     ...(q.from || q.to
       ? { fechaEmision: { ...(q.from ? { gte: q.from } : {}), ...(q.to ? { lte: q.to } : {}) } }
       : {}),
+    ...side,
   };
 
   const [rows, total] = await Promise.all([
@@ -335,7 +381,7 @@ export async function listInvoices(userId: string, q: ListInvoicesQuery) {
   ]);
 
   return {
-    items: rows.map((r) => toPublicInvoice(r)),
+    items: rows.map((r) => toPublicInvoice(r, ownRuc)),
     total,
     page: q.page,
     pageSize: q.pageSize,
@@ -374,6 +420,23 @@ export async function setCategoria(
     include: { items: true },
   });
   return toPublicInvoice(updated);
+}
+
+/** Files an invoice as a sale or a purchase, or back under the RUC (null). */
+export async function setTipo(
+  userId: string,
+  id: string,
+  tipo: 'venta' | 'compra' | null,
+): Promise<PublicInvoice> {
+  const invoice = await prisma.invoice.findFirst({ where: { id, userId }, select: { id: true } });
+  if (!invoice) throw AppError.notFound('Factura no encontrada');
+  const owner = await prisma.user.findUnique({ where: { id: userId }, select: { ruc: true } });
+  const updated = await prisma.invoice.update({
+    where: { id },
+    data: { esVenta: tipo == null ? null : tipo === 'venta' },
+    include: { items: true },
+  });
+  return toPublicInvoice(updated, owner?.ruc ?? null);
 }
 
 export async function deleteInvoice(userId: string, id: string): Promise<void> {

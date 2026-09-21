@@ -35,6 +35,9 @@ class Invoice with _$Invoice {
     required DateTime fechaEmision,
     @Default('PYG') String moneda,
     // What the invoice is filed under, and whether a person chose it.
+    // Sale (IVA debito) or purchase (IVA credito): DNIT keeps them apart.
+    @Default('compra') String tipo,
+    @Default(false) bool tipoManual,
     @Default('otros') String categoria,
     @Default('Otros') String categoriaLabel,
     @Default(false) bool categoriaManual,

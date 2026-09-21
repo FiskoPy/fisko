@@ -159,6 +159,7 @@ class CapturaPage extends ConsumerWidget {
       body: Column(
         children: [
           _MonthBar(selected: state.period),
+          _LedgerBar(selected: state.tipo),
           Expanded(
             child: RefreshIndicator(
               onRefresh: () => ref.read(invoicesControllerProvider.notifier).load(),
@@ -246,22 +247,10 @@ class _PeriodTotals extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final summary = ref.watch(fiscalSummaryProvider).valueOrNull;
+    final summary = ref.watch(monthSummaryProvider).valueOrNull;
     if (summary == null) return const SizedBox.shrink();
-
-    final key = period == null
-        ? null
-        : '${period!.year.toString().padLeft(4, '0')}-${period!.month.toString().padLeft(2, '0')}';
-    MonthBucket? bucket;
-    if (key != null) {
-      for (final b in summary.byMonth) {
-        if (b.month == key) bucket = b;
-      }
-    }
-    final count = bucket?.count ?? (key == null ? summary.count : 0);
-    final total = bucket?.total ?? (key == null ? summary.totalOpe : 0);
-    final iva = bucket?.iva ?? (key == null ? summary.totalIva : 0);
     final scheme = Theme.of(context).colorScheme;
+    final saldo = summary.ivaDebito - summary.ivaCredito;
 
     return Container(
       margin: const EdgeInsets.fromLTRB(12, 4, 12, 12),
@@ -277,9 +266,50 @@ class _PeriodTotals extends ConsumerWidget {
             period == null ? 'Todos los meses' : formatMonthLong(period!),
             style: const TextStyle(fontWeight: FontWeight.bold),
           ),
-          const SizedBox(height: 6),
-          Text('$count comprobante(s) · ${formatGs(total)}'),
-          Text('IVA ${formatGs(iva)}', style: TextStyle(color: scheme.outline)),
+          Text(
+            '${summary.count} comprobante(s) computables'
+            '${summary.sinOperacion > 0 ? " - ${summary.sinOperacion} nota(s) de remision" : ""}',
+            style: TextStyle(color: scheme.outline, fontSize: 12),
+          ),
+          const SizedBox(height: 10),
+          // Sales and purchases never share a figure: the IVA of a sale is
+          // debito fiscal and the IVA of a purchase is credito computable,
+          // and DNIT declares them apart.
+          _Side(
+            title: 'Ventas (facturas emitidas)',
+            total: summary.ventas,
+            ivaLabel: 'IVA debito fiscal',
+            iva: summary.ivaDebito,
+          ),
+          const SizedBox(height: 8),
+          _Side(
+            title: 'Compras y gastos (facturas recibidas)',
+            total: summary.compras,
+            ivaLabel: 'IVA credito computable',
+            iva: summary.ivaCredito,
+          ),
+          const Divider(height: 20),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                saldo > 0 ? 'IVA estimado a pagar' : 'Saldo de credito a favor',
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+              Text(
+                formatGs(saldo.abs()),
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: saldo > 0 ? scheme.error : scheme.primary,
+                ),
+              ),
+            ],
+          ),
+          if (summary.saldoAnterior > 0)
+            Text(
+              'Incluye ${formatGs(summary.saldoAnterior)} a favor del periodo anterior',
+              style: TextStyle(color: scheme.outline, fontSize: 12),
+            ),
           if (summary.sinConversion > 0)
             Padding(
               padding: const EdgeInsets.only(top: 6),
@@ -287,6 +317,77 @@ class _PeriodTotals extends ConsumerWidget {
                 '${summary.sinConversion} en moneda extranjera sin tipo de cambio quedaron fuera '
                 'de estos totales.',
                 style: TextStyle(color: scheme.error, fontSize: 12),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// One side of the ledger: what it totals, and the IVA it carries.
+class _Side extends StatelessWidget {
+  const _Side({
+    required this.title,
+    required this.total,
+    required this.ivaLabel,
+    required this.iva,
+  });
+
+  final String title;
+  final double total;
+  final String ivaLabel;
+  final double iva;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Flexible(child: Text(title)),
+            Text(formatGs(total), style: const TextStyle(fontWeight: FontWeight.w600)),
+          ],
+        ),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(ivaLabel, style: TextStyle(color: scheme.outline, fontSize: 12)),
+            Text(formatGs(iva), style: TextStyle(color: scheme.outline, fontSize: 12)),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+/// Sales, purchases, or both — the filter the client asked for.
+class _LedgerBar extends ConsumerWidget {
+  const _LedgerBar({required this.selected});
+
+  final String? selected;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final notifier = ref.read(invoicesControllerProvider.notifier);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
+      child: Row(
+        children: [
+          for (final option in const [
+            (null, 'Todos'),
+            ('venta', 'Ventas'),
+            ('compra', 'Compras y gastos'),
+          ])
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: ChoiceChip(
+                label: Text(option.$2),
+                selected: selected == option.$1,
+                onSelected: (_) => notifier.setTipo(option.$1),
               ),
             ),
         ],
@@ -348,7 +449,9 @@ class _InvoiceTile extends StatelessWidget {
       ),
       title: Text(invoice.emisorNombre, maxLines: 1, overflow: TextOverflow.ellipsis),
       subtitle: Text(
-        '${tipoDocLabel(invoice.tipoDoc, invoice.tipoDocDesc)} · ${formatDocDate(invoice.fechaEmision)}',
+        '${invoice.tipo == 'venta' ? 'Venta' : 'Compra'}'
+        ' · ${tipoDocLabel(invoice.tipoDoc, invoice.tipoDocDesc)}'
+        ' · ${formatDocDate(invoice.fechaEmision)}',
       ),
       trailing: Column(
         mainAxisAlignment: MainAxisAlignment.center,

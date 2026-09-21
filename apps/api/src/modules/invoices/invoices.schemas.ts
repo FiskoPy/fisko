@@ -14,7 +14,13 @@ export const setCategoriaSchema = z.object({
   categoria: z.string().min(2).max(40).nullable(),
 });
 
+export const setTipoSchema = z.object({
+  tipo: z.enum(['venta', 'compra']).nullable(),
+});
+
 export const listInvoicesQuerySchema = z.object({
+  /** One side of the ledger, or both when absent. */
+  tipo: z.enum(['venta', 'compra']).optional(),
   from: z.coerce.date().optional(),
   to: z.coerce.date().optional(),
   tipoDoc: z.coerce.number().int().optional(),

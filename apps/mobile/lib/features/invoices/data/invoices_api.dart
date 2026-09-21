@@ -45,6 +45,7 @@ class InvoicesApi {
     int pageSize = 20,
     DateTime? from,
     DateTime? to,
+    String? tipo,
   }) async {
     final res = await _dio.get<Map<String, dynamic>>(
       '/invoices',
@@ -53,6 +54,7 @@ class InvoicesApi {
         'pageSize': pageSize,
         if (from != null) 'from': from.toIso8601String().substring(0, 10),
         if (to != null) 'to': to.toIso8601String().substring(0, 10),
+        if (tipo != null) 'tipo': tipo,
       },
     );
     return InvoiceList.fromJson(res.data!);
@@ -68,6 +70,15 @@ class InvoicesApi {
     final res = await _dio.patch<Map<String, dynamic>>(
       '/invoices/$id/categoria',
       data: {'categoria': categoria},
+    );
+    return Invoice.fromJson(res.data!['invoice'] as Map<String, dynamic>);
+  }
+
+  /// Files the invoice as a sale or a purchase, or back under the RUC (null).
+  Future<Invoice> setTipo(String id, String? tipo) async {
+    final res = await _dio.patch<Map<String, dynamic>>(
+      '/invoices/$id/tipo',
+      data: {'tipo': tipo},
     );
     return Invoice.fromJson(res.data!['invoice'] as Map<String, dynamic>);
   }

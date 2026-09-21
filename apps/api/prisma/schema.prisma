@@ -96,6 +96,11 @@ model Invoice {
   xmlRaw      String?
   createdAt   DateTime @default(now())
 
+  // Whether this is a sale of the taxpayer's (IVA débito) rather than a
+  // purchase (IVA crédito). Null means it follows the RUC: issuer is the
+  // taxpayer -> sale. Set only when a person corrects it.
+  esVenta   Boolean?
+
   // Set by hand when the rules get it wrong: "CAPAZ (Sulfentrazona)" is an
   // agricultural input, not "Otros". Null means the rules decide, so an
   // improved ruleset still applies to everything that was never corrected.

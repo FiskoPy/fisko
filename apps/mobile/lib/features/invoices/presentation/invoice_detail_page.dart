@@ -78,6 +78,7 @@ class _Detail extends ConsumerWidget {
         const SizedBox(height: 8),
         _row('Tipo', tipoDocLabel(inv.tipoDoc, inv.tipoDocDesc)),
         _row('Fecha', formatDocDate(inv.fechaEmision)),
+        _TipoRow(invoice: inv),
         _CategoriaRow(invoice: inv),
         if (inv.receptorNombre != null) _row('Receptor', inv.receptorNombre!),
         _row('CDC', inv.cdc, mono: true),
@@ -145,6 +146,93 @@ class _Detail extends ConsumerWidget {
               style: mono ? const TextStyle(fontFamily: 'monospace', fontSize: 12) : null,
             ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Sale or purchase — the side of the IVA this invoice falls on, and a way to
+/// correct it when the RUC does not settle it.
+class _TipoRow extends ConsumerStatefulWidget {
+  const _TipoRow({required this.invoice});
+
+  final Invoice invoice;
+
+  @override
+  ConsumerState<_TipoRow> createState() => _TipoRowState();
+}
+
+class _TipoRowState extends ConsumerState<_TipoRow> {
+  bool _saving = false;
+
+  Future<void> _pick() async {
+    final inv = widget.invoice;
+    final chosen = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            ListTile(
+              title: const Text('Venta (factura emitida)'),
+              subtitle: const Text('Su IVA es débito fiscal'),
+              trailing: inv.tipo == 'venta' ? const Icon(Icons.check) : null,
+              onTap: () => Navigator.pop(ctx, 'venta'),
+            ),
+            ListTile(
+              title: const Text('Compra o gasto (factura recibida)'),
+              subtitle: const Text('Su IVA es crédito fiscal computable'),
+              trailing: inv.tipo == 'compra' ? const Icon(Icons.check) : null,
+              onTap: () => Navigator.pop(ctx, 'compra'),
+            ),
+            if (inv.tipoManual)
+              ListTile(
+                leading: const Icon(Icons.auto_fix_high_outlined),
+                title: const Text('Volver a decidirlo por el RUC'),
+                onTap: () => Navigator.pop(ctx, '__auto__'),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (chosen == null || !mounted) return;
+
+    setState(() => _saving = true);
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await ref
+          .read(invoicesRepositoryProvider)
+          .setTipo(inv.id, chosen == '__auto__' ? null : chosen);
+      ref.invalidate(invoiceDetailProvider(inv.id));
+      ref.read(invoicesControllerProvider.notifier).refreshAfterChange();
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(friendlyError(e))));
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final inv = widget.invoice;
+    final venta = inv.tipo == 'venta';
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          const Text('Tipo'),
+          _saving
+              ? const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2))
+              : TextButton.icon(
+                  onPressed: _pick,
+                  icon: const Icon(Icons.edit_outlined, size: 16),
+                  label: Text(
+                    venta ? 'Venta · IVA débito' : 'Compra o gasto · IVA crédito',
+                  ),
+                ),
         ],
       ),
     );

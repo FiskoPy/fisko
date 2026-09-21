@@ -12,8 +12,15 @@ class InvoicesRepository {
   final InvoicesApi _api;
 
   Future<Invoice> importXml(String xml) => _run(() => _api.importXml(xml));
-  Future<InvoiceList> list({int page = 1, int pageSize = 20, DateTime? from, DateTime? to}) =>
-      _run(() => _api.list(page: page, pageSize: pageSize, from: from, to: to));
+  Future<InvoiceList> list({
+    int page = 1,
+    int pageSize = 20,
+    DateTime? from,
+    DateTime? to,
+    String? tipo,
+  }) =>
+      _run(() => _api.list(page: page, pageSize: pageSize, from: from, to: to, tipo: tipo));
+  Future<Invoice> setTipo(String id, String? tipo) => _run(() => _api.setTipo(id, tipo));
   Future<Invoice> detail(String id) => _run(() => _api.detail(id));
   Future<Invoice> setCategoria(String id, String? categoria) =>
       _run(() => _api.setCategoria(id, categoria));

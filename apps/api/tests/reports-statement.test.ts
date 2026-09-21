@@ -118,6 +118,52 @@ describe('which income tax is estimated', () => {
   });
 });
 
+describe('sales and purchases are two ledgers, not one total', () => {
+  const auth = () => ({ Authorization: `Bearer ${token}` });
+
+  it('lists one side at a time, by the RUC on the invoice', async () => {
+    const ventas = await request(app).get(`${base}/invoices?tipo=venta`).set(auth());
+    const compras = await request(app).get(`${base}/invoices?tipo=compra`).set(auth());
+
+    expect(ventas.status).toBe(200);
+    // The taxpayer issued one of these (emisorRuc 80175384, his own).
+    expect(ventas.body.items.every((i: { tipo: string }) => i.tipo === 'venta')).toBe(true);
+    expect(ventas.body.items.length).toBeGreaterThan(0);
+    expect(compras.body.items.every((i: { tipo: string }) => i.tipo === 'compra')).toBe(true);
+    expect(compras.body.items.length).toBeGreaterThan(0);
+    // Between them they are the whole list.
+    const all = await request(app).get(`${base}/invoices?pageSize=100`).set(auth());
+    expect(ventas.body.total + compras.body.total).toBe(all.body.total);
+  });
+
+  it('moves the IVA from crédito to débito when the side is corrected', async () => {
+    const compra = await prisma.invoice.findFirstOrThrow({
+      where: { userId, emisorRuc: '80054993', fechaEmision: new Date('2026-07-10T00:00:00.000Z') },
+    });
+    const before = await getSummary(userId, month('2026-07'));
+    expect(before.ivaCredito).toBe(500_000);
+    expect(before.ivaDebito).toBe(0);
+
+    const res = await request(app)
+      .patch(`${base}/invoices/${compra.id}/tipo`)
+      .set(auth())
+      .send({ tipo: 'venta' });
+    expect(res.status).toBe(200);
+    expect(res.body.invoice).toMatchObject({ tipo: 'venta', tipoManual: true });
+
+    const after = await getSummary(userId, month('2026-07'));
+    expect(after.ivaDebito).toBe(500_000);
+    expect(after.ivaCredito).toBe(0);
+    // And the carry into August follows it: nothing left over to carry.
+    expect((await getSummary(userId, month('2026-08'))).saldoAnterior).toBe(0);
+
+    // Back under the RUC.
+    await request(app).patch(`${base}/invoices/${compra.id}/tipo`).set(auth()).send({ tipo: null });
+    const back = await getSummary(userId, month('2026-07'));
+    expect(back.ivaCredito).toBe(500_000);
+  });
+});
+
 describe('correcting a category by hand', () => {
   it('files the invoice where the user says, and keeps it there', async () => {
     const invoice = await compra('2026-08-20', 1_100_000, 100_000, {
