@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
+  datePartlySeen,
   dateSeen,
   decidePhoto,
   digitsSeen,
@@ -553,6 +554,74 @@ describe('reading the text for what it shows', () => {
     expect(decision).toMatchObject({ kind: 'store', source: 'ai' });
     expect(decision.reading).toMatchObject({ total: 900_000, iva10: 81_818, emisorRuc: '6902656' });
     expect(decision.reading?.fechaEmision?.toISOString().slice(0, 10)).toBe('2026-08-19');
+  });
+
+  it('reads a month written by hand through one misread letter', () => {
+    // Vision loses a letter of a word filled in by hand often enough that
+    // refusing over it costs an invoice whose every figure was verified.
+    const page = (linea: string) =>
+      [
+        'CEVELIO SERVICIO GENERALES Y METALURGICA',
+        'TIMBRADO N° 18908353',
+        'Fecha inicio vigencia 08/06/2026',
+        'Fecha fin vigencia 30/09/2026',
+        linea,
+        'TOTAL A PAGAR 900.000',
+      ].join('\n');
+    const day = new Date(Date.UTC(2026, 7, 19));
+
+    for (const mes of ['Agosto', 'Agasto', 'Agost']) {
+      expect(`${mes}: ${dateSeen(page(`Fecha de Emisión: 19 de. ${mes} de 20.26`), day)}`).toBe(
+        `${mes}: true`,
+      );
+    }
+
+    // One letter is not a licence to read another month: junio and julio are
+    // one apart, and the month is the period the IVA is declared in.
+    const junio = page('Fecha de Emisión: 19 de. Junio de 20.26');
+    expect(dateSeen(junio, new Date(Date.UTC(2026, 6, 19)))).toBe(false);
+    expect(dateSeen(junio, new Date(Date.UTC(2026, 5, 19)))).toBe(true);
+  });
+
+  it('keeps a date whose month is illegible, and says to check it', () => {
+    const text = [
+      'CEVELIO SERVICIO GENERALES Y METALURGICA',
+      'Fecha inicio vigencia 08/06/2026',
+      'Fecha de Emisión: 19 de. Xgqsfo de 20.26 Condición de Venta',
+      'TOTAL A PAGAR 900.000',
+      'LIQUIDACIÓN DEL : 5%) ( ) 81,818 TOTAL IVA: 81,818',
+    ].join('\n');
+    const day = new Date(Date.UTC(2026, 7, 19));
+    expect(dateSeen(text, day)).toBe(false);
+    expect(datePartlySeen(text, day)).toBe(true);
+
+    const ai = fromExtraction({
+      ...aiFixture('minas281'),
+      emisorNombre: 'CEVELIO SERVICIO GENERALES Y METALURGICA',
+      emisorRuc: '6902656',
+      emisorDv: 4,
+      receptorRuc: '80175384',
+      timbrado: null,
+      numeroDoc: null,
+      fecha: '2026-08-19',
+      total: 900_000,
+      gravada5: null,
+      gravada10: 900_000,
+      exentas: null,
+      iva5: null,
+      iva10: 81_818,
+      totalIva: 81_818,
+      items: [],
+    });
+    const { reading } = witnessed(ai, text, '80175384', null);
+    expect(reading.fechaEmision?.toISOString().slice(0, 10)).toBe('2026-08-19');
+    expect(reading.missing).toContain('Fecha (confirmá el mes)');
+
+    // …and it is stored, not turned away.
+    expect(decidePhoto(parseReceipt(text), ai, text, '80175384')).toMatchObject({
+      kind: 'store',
+      source: 'ai',
+    });
   });
 
   it('reads a date however it is printed', () => {

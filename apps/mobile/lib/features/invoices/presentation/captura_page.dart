@@ -90,7 +90,13 @@ class CapturaPage extends ConsumerWidget {
       // There is no editing yet, so the honest remedy is: look at it, and if it
       // came out wrong, delete it and shoot the photo again.
       final String msg;
-      if (out.missing.isNotEmpty) {
+      // A date read off handwriting whose month the page could not confirm is
+      // stored and flagged, not refused: everything else on it was verified.
+      final revisar = out.missing.where((m) => m.startsWith('Fecha (')).toList();
+      if (revisar.isNotEmpty) {
+        msg = 'Importada. Revisá la fecha: leímos el día y el año, pero no pudimos '
+            'confirmar el mes escrito a mano.';
+      } else if (out.missing.isNotEmpty) {
         msg = 'Importada, pero no pudimos leer: ${out.missing.join(", ")}. '
             'Revisala; si quedó mal, borrala y sacá la foto de nuevo.';
       } else if (out.confidence < 0.7) {

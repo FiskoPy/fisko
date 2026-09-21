@@ -170,6 +170,52 @@ function misread(printed: Set<string>, word: string): boolean {
 
 const MONTHS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'se', 'oct', 'nov', 'dic'];
 
+/** Written out, as a talonario's blank is filled in by hand. */
+const MONTH_WORDS = [
+  'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+  'julio', 'agosto', 'setiembre', 'octubre', 'noviembre', 'diciembre',
+];
+
+/** Whether two words differ by at most one letter (insert, drop or swap). */
+function withinOneEdit(a: string, b: string): boolean {
+  if (a === b) return true;
+  if (Math.abs(a.length - b.length) > 1) return false;
+  const [short, long] = a.length <= b.length ? [a, b] : [b, a];
+  let i = 0;
+  let j = 0;
+  let edits = 0;
+  while (i < short.length && j < long.length) {
+    if (short[i] === long[j]) {
+      i += 1;
+      j += 1;
+      continue;
+    }
+    if (++edits > 1) return false;
+    if (short.length === long.length) i += 1;
+    j += 1;
+  }
+  return edits + (long.length - j) + (short.length - i) <= 1;
+}
+
+/**
+ * Whether the window names this month — written out, and read off handwriting.
+ *
+ * Vision misses a letter of a word filled in by hand ("agosto" came back with
+ * one letter wrong on the client's talonario), so one edit is allowed. Never
+ * into another month, though: "junio" and "julio" are one letter apart, and
+ * the month is the period the IVA is declared in.
+ */
+function monthNamed(window: string, month: number): boolean {
+  const word = MONTH_WORDS[month - 1] as string;
+  const prefix = MONTHS[month - 1] as string;
+  for (const token of window.match(/[a-z]{3,}/g) ?? []) {
+    if (token.startsWith(prefix)) return true;
+    const otherMonth = MONTH_WORDS.some((w, i) => i !== month - 1 && w === token);
+    if (!otherMonth && token.length >= 4 && withinOneEdit(token, word)) return true;
+  }
+  return false;
+}
+
 /**
  * A line that says this date is when the invoice was issued, and lines that
  * say it is anything else — due, valid from, made on, delivered on, or the
@@ -225,20 +271,7 @@ export function dateSeen(text: string, date: Date): boolean {
   const labelled = lines
     .map((line, i) => ({ line, i }))
     .filter(({ line }) => EMISSION.test(line) && !RIVAL.test(line) && !FOOT.test(line));
-  const monthName = `${MONTHS[m - 1]}[a-z]*`;
-  const dayMonth = new RegExp(`(?<!\\d)0?${d}\\s*(?:de\\s*)?\\.?\\s*(?:de\\s*)?${monthName}`);
-  const yearAnywhere = new RegExp(
-    `(?<!\\d)(?:${y}|${String(y).slice(0, 2)}\\s*[.\\s]\\s*${String(y).slice(2)})(?!\\d)`,
-  );
-  if (
-    yearAnywhere.test(lines.join('\n')) &&
-    labelled.some(({ i }) => {
-      const below = lines.slice(i, i + 3).filter((l, k) => k === 0 || !RIVAL.test(l));
-      return dayMonth.test(below.join(' '));
-    })
-  ) {
-    return true;
-  }
+  if (labelled.some(({ i }) => handwrittenNear(lines, i, d, m, y).full)) return true;
 
   const own = at.filter((i) => !RIVAL.test(lines[i] as string) && !FOOT.test(near(i)));
   if (!own.length) return false;
@@ -271,6 +304,60 @@ export function dateSeen(text: string, date: Date): boolean {
     .filter((printed) => !patterns.some((p) => p.test(printed)));
   return others.length === 0;
 }
+
+/**
+ * A date filled into a talonario's blanks, read around the emission label at
+ * [i]: the day beside the label, the month written out near it, the year
+ * anywhere on the page (the printed "20" and a handwritten "26" come back as
+ * "20.26").
+ *
+ * `full` means all three were read. `dayYear` means the day and the year were,
+ * and only the month word was lost — the reading is kept then, and flagged for
+ * the user to check, because refusing an invoice whose every figure has been
+ * verified over one handwritten word helps nobody.
+ */
+function handwrittenNear(
+  lines: string[],
+  i: number,
+  d: number,
+  m: number,
+  y: number,
+): { full: boolean; dayYear: boolean } {
+  const window = lines
+    .slice(i, i + 3)
+    .filter((line, k) => k === 0 || !RIVAL.test(line))
+    .join(' ');
+  const day = new RegExp(`(?<!\\d)0?${d}\\s*(?:de\\s*)?\\.?(?![\\d/.-]?\\d)`).test(window);
+  const year = new RegExp(
+    `(?<!\\d)(?:${y}|${String(y).slice(0, 2)}\\s*[.\\s]\\s*${String(y).slice(2)})(?!\\d)`,
+  ).test(lines.join('\n'));
+  if (!day || !year) return { full: false, dayYear: false };
+  return { full: monthNamed(window, m), dayYear: true };
+}
+
+/**
+ * Whether the page shows the day and the year of this date beside its emission
+ * label, but not the month in words.
+ *
+ * On a handwritten talonario Vision gets a letter of the month wrong often
+ * enough that refusing over it costs the client invoices whose every figure
+ * has been verified. The reading is kept and flagged instead, so the app can
+ * ask him to check the date rather than turn the photo away.
+ */
+export function datePartlySeen(text: string, date: Date): boolean {
+  const y = date.getUTCFullYear();
+  const m = date.getUTCMonth() + 1;
+  const d = date.getUTCDate();
+  const lines = text.toLowerCase().split(/\r?\n/);
+  return lines.some((line, i) => {
+    if (!EMISSION.test(line) || RIVAL.test(line) || FOOT.test(line)) return false;
+    const seen = handwrittenNear(lines, i, d, m, y);
+    return seen.dayYear && !seen.full;
+  });
+}
+
+/** The label the app shows when a date was read but not fully confirmed. */
+export const DATE_UNCONFIRMED = 'Fecha (confirmá el mes)';
 
 /** The digits of a document number's last group: "001-001-0000637" → "0000637". */
 const lastGroup = (numeroDoc: string): string => numeroDoc.split(/\D+/).filter(Boolean).pop() ?? '';
@@ -343,6 +430,7 @@ export function witnessed(
     rateShown();
 
   const r: ParsedReceipt = { ...ai };
+  let unconfirmedDate = false;
   if (r.cdc && !digitsSeen(text, r.cdc)) r.cdc = null;
   if (!r.cdc) {
     // The user is the buyer, and so is whoever the parser read in the receptor
@@ -372,7 +460,13 @@ export function witnessed(
       r.emisorDv = null;
     }
     if (r.numeroDoc && !digitsSeen(text, lastGroup(r.numeroDoc))) r.numeroDoc = null;
-    if (r.fechaEmision && !dateSeen(text, r.fechaEmision)) r.fechaEmision = null;
+    if (r.fechaEmision && !dateSeen(text, r.fechaEmision)) {
+      // Day and year beside the emission label, month lost to handwriting:
+      // keep it and say so, rather than refuse an invoice whose amounts the
+      // page confirmed (Cevelio, 2026-09-20).
+      if (datePartlySeen(text, r.fechaEmision)) unconfirmedDate = true;
+      else r.fechaEmision = null;
+    }
   }
   if (r.timbrado && !digitsSeen(text, r.timbrado)) r.timbrado = null;
   if (r.receptorRuc && !digitsSeen(text, r.receptorRuc)) r.receptorRuc = null;
@@ -384,7 +478,11 @@ export function witnessed(
   if (!namedIn(printed, r.emisorNombre)) r.emisorNombre = null;
   if (!namedIn(printed, r.receptorNombre)) r.receptorNombre = null;
   if (!r.items.every((it) => shown(it.total) && namedIn(printed, it.descripcion))) r.items = [];
-  return { reading: recounted(r), seen };
+  const reading = recounted(r);
+  if (unconfirmedDate && !reading.missing.includes(DATE_UNCONFIRMED)) {
+    reading.missing = [...reading.missing, DATE_UNCONFIRMED];
+  }
+  return { reading, seen };
 }
 
 // ---------------------------------------------------------------------------
