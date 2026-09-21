@@ -48,15 +48,16 @@ String formatIsoDay(String ymd) {
 }
 
 /// A rate typed by hand, the way it is written here or not: "5.921,39",
-/// "5921,39", "5921.39", "5.921". Null when it is not a positive number.
+/// "5921,39", "5.921", and "5,921.39" or "5921.39" too. The last separator is
+/// the decimal point when one or two digits follow it; any other is grouping.
+/// "5,921.39" read as 5,92139 would put a dollar invoice into the IVA a
+/// thousand times too small. Null when it is not a positive number.
 double? parseRate(String input) {
-  var s = input.replaceAll(RegExp(r'\s'), '');
-  if (s.contains(',')) {
-    s = s.replaceAll('.', '').replaceAll(',', '.');
-  } else if (RegExp(r'^\d{1,3}(\.\d{3})+$').hasMatch(s)) {
-    s = s.replaceAll('.', '');
-  }
-  final v = double.tryParse(s);
+  final s = input.replaceAll(RegExp(r'\s'), '');
+  if (!RegExp(r'^\d[\d.,]*$').hasMatch(s)) return null;
+  final decimal = RegExp(r'[.,](\d{1,2})$').firstMatch(s);
+  final whole = (decimal != null ? s.substring(0, decimal.start) : s).replaceAll(RegExp(r'[.,]'), '');
+  final v = double.tryParse(decimal != null ? '$whole.${decimal.group(1)}' : whole);
   return v != null && v > 0 ? v : null;
 }
 

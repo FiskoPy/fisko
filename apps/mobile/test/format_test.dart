@@ -38,7 +38,11 @@ void main() {
 
     test('reads the other way too', () {
       expect(parseRate('5921.39'), 5921.39);
+      expect(parseRate('5,921.39'), 5921.39);
+      expect(parseRate('5,921'), 5921);
       expect(parseRate(' 6030 '), 6030);
+      // Currencies quoted in a few guaraníes keep their decimals.
+      expect(parseRate('3,91'), 3.91);
     });
 
     test('is nothing when it is not a positive number', () {

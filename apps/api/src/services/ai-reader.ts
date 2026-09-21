@@ -96,7 +96,7 @@ const INSTRUCTIONS =
   'americanos", "Moneda: USD"). Many talonarios print the choice beside the total, "Son: [ ] ' +
   'Guaranies [ ] Dolares Americanos": both words are always printed, and the currency is the one ' +
   'whose box is marked (an X or a tick) — look at the boxes, not the words. Guaranies have no ' +
-  'cents: an IVA of "45,45", or a total written out "con 00/100", is not in guaranies. ' +
+  'cents: printed figures with cents, like an IVA of "45,45", are not in guaranies. ' +
   'tipoCambio: the printed exchange rate ("Cotizacion", "Tipo de ' +
   'cambio") in guaranies per unit, else null. totalEnGuaranies: a printed total in guaranies when ' +
   'the invoice is in another currency, else null. emisor is the seller that issued the invoice ' +

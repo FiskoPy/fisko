@@ -110,7 +110,10 @@ export function itemsFitting(reading: ParsedReceipt, items: ParsedItem[]): Parse
 export function printedAmounts(text: string): Set<number> {
   const out = new Set<number>();
   for (const token of text.match(/\d(?:[\d.,]*\d)?/g) ?? []) {
-    out.add(Number(token.replace(/\D/g, '')) * 100);
+    // As a whole number only when every separator groups thousands: "45.45"
+    // is 45,45 and never 4.545 — read that way, a dollar receipt's IVA vouched
+    // for a model that took its cents for guaraníes.
+    if (!/[.,](?!\d{3}(?:[.,]|$))/.test(token)) out.add(Number(token.replace(/\D/g, '')) * 100);
     const decimal = token.match(/^(.*\d)[.,](\d{1,2})$/);
     if (decimal) {
       out.add(Math.round(Number(`${(decimal[1] as string).replace(/\D/g, '')}.${decimal[2]}`) * 100));
@@ -539,6 +542,10 @@ export function witnessed(
 
   const r: ParsedReceipt = { ...ai };
   let unconfirmedDate = false;
+  // A rate no printed guaraní total confirms is not the invoice's: kept, it
+  // went on record beside the parser's figures as the document's own — which
+  // no one can then correct (see setTipoCambio).
+  if (!rateShown()) r.tipoCambio = null;
   if (r.cdc && !digitsSeen(text, r.cdc)) r.cdc = null;
   if (!r.cdc) {
     // The user is the buyer, and so is whoever the parser read in the receptor
@@ -633,16 +640,18 @@ const ADDRESS = /\b(?:ruta|calle|avda|avenida|km|casi|esquina|barrio|paraguay)\b
 function issuerName(
   ocrName: string | null,
   aiName: string | null,
-  buyerName: string | null,
+  buyerNames: (string | null)[],
 ): string | null {
   if (!ocrName || !aiName) return ocrName ?? aiName;
   const short = words(aiName);
   const whole = short.includes(' ') || short.length >= 6;
   if (whole && words(ocrName).startsWith(short)) return aiName;
-  if (ADDRESS.test(aiName)) return ocrName;
-  const buyer = buyerName ? words(buyerName) : '';
-  const isBuyer = BUYER_LINE.test(ocrName) || (buyer.length >= 4 && words(ocrName).includes(buyer));
-  return LEGAL_FORM.test(ocrName) && !isBuyer ? ocrName : aiName;
+  // Nor the buyer's name, which the model has given as the seller's with the
+  // RUCs right ("Tec Bio Solution" for Cevelio).
+  const buyers = buyerNames.map((b) => (b ? words(b) : '')).filter((b) => b.length >= 4);
+  const isBuyer = (name: string) => buyers.some((b) => words(name).includes(b) || b.includes(words(name)));
+  if (ADDRESS.test(aiName) || isBuyer(aiName)) return ocrName;
+  return LEGAL_FORM.test(ocrName) && !BUYER_LINE.test(ocrName) && !isBuyer(ocrName) ? ocrName : aiName;
 }
 
 /**
@@ -673,11 +682,10 @@ function identified(
     return other.emisorRuc == null ? (other.emisorNombre ?? null) : null;
   };
   const emisorNombre = sameIssuer
-    ? issuerName(
-        ocr?.emisorNombre ?? null,
-        ai?.emisorNombre ?? null,
-        ai?.receptorNombre ?? ocr?.receptorNombre ?? null,
-      )
+    ? issuerName(ocr?.emisorNombre ?? null, ai?.emisorNombre ?? null, [
+        ai?.receptorNombre ?? null,
+        ocr?.receptorNombre ?? null,
+      ])
     : (from.emisorNombre ?? otherName());
 
   const buyer = [first.receptorRuc, second?.receptorRuc].find((r) => r && r !== emisorRuc) ?? null;
@@ -704,8 +712,28 @@ function identified(
   });
 }
 
-/** An exchange rate printed on the page: "Cotizacion: 6.027,92Gs.". */
-const RATE_PRINTED = /(?:cotizaci[oó]n|tipo\s*de\s*cambio)[^\d\n]{0,12}\d[\d.,]{2,}/i;
+/** A rate label: "Cotización", "Tipo de cambio", "Tipo Cambio", "T. Cambio", "T.C.". */
+const RATE_LABEL = /cotiz\w*|tipo\s*(?:de\s*)?cambio|\bt\.\s*c(?:ambio|\.)/i;
+
+/**
+ * Whether the page prints its own exchange rate: a rate label with a figure
+ * beside it, or alone on its line with the figure on the next — Vision's
+ * blocks put "Cotizacion:" and "6.027,92Gs." on two lines as often as one.
+ * Not the clause about paying "al tipo de cambio del día".
+ */
+function ratePrinted(texts: string[]): boolean {
+  return texts.some((text) => {
+    const lines = text.split(/\r?\n/);
+    return lines.some((line, i) => {
+      const at = line.match(RATE_LABEL);
+      if (!at) return false;
+      const rest = line.slice((at.index ?? 0) + at[0].length);
+      if (/del\s*d[ií]a/i.test(rest)) return false;
+      if (/\d[\d.,]{2,}/.test(rest)) return true;
+      return /^[\s:.]*(?:gs\.?)?\s*$/i.test(rest) && /^\s*(?:gs\.?\s*)?\d[\d.,]{2,}/i.test(lines[i + 1] ?? '');
+    });
+  });
+}
 
 /**
  * A reading to store — unless it is in another currency and the page prints
@@ -713,19 +741,26 @@ const RATE_PRINTED = /(?:cotizaci[oó]n|tipo\s*de\s*cambio)[^\d\n]{0,12}\d[\d.,]
  * carries before any other, and its XML has it; the DNIT's close is for the
  * invoice that prints none (see exchange-rates).
  */
-function stored(reading: ParsedReceipt, source: PhotoSource, text: string): PhotoDecision {
-  if (reading.foreignCurrency && reading.tipoCambio == null && RATE_PRINTED.test(text)) {
+function stored(reading: ParsedReceipt, source: PhotoSource, texts: string[]): PhotoDecision {
+  if (reading.foreignCurrency && reading.tipoCambio == null && ratePrinted(texts)) {
     return { kind: 'refuse', reason: 'moneda', reading, detail: 'rate' };
   }
   return { kind: 'store', reading, source };
 }
 
-/** A total written out with its cents: "quinientos con 00/100". */
-const CENTS_IN_WORDS = /\bcon\s*\d{1,2}\s*\/\s*100\b|centavo/;
-
-/** Whether any of these amounts has cents — which a guaraní never does. */
-const hasCents = (values: (number | null)[]): boolean =>
-  values.some((v) => v != null && Math.abs(v - Math.round(v)) > 1e-9);
+/**
+ * Whether one of these figures has cents and is printed with them — which a
+ * guaraní never is. Printed, and matching: the model can write an IVA of
+ * 81.818,18 it worked out from a Gs 900.000 total, and "con 00/100" is how
+ * some write a guaraní total out too. The 45,45 on a dollar rent receipt is
+ * on the paper.
+ */
+function centsPrinted(values: (number | null)[], text: string): boolean {
+  const cents = printedAmounts(text);
+  return values.some(
+    (v) => v != null && Math.abs(v - Math.round(v)) > 1e-9 && cents.has(Math.round(v * 100)),
+  );
+}
 
 /**
  * The model's extraction in the currency the page is in.
@@ -735,46 +770,51 @@ const hasCents = (values: (number | null)[]): boolean =>
  * sees the tick, but not reliably: one dollar rent receipt came back in
  * dollars in production and in guaraníes on the same photo here, with an IVA
  * of 45,45 (Residencial Domicia, 2026-09-21). Guaraníes have no cents, so a
- * reading in guaraníes that carries them — in its figures, or in the total
- * written out — on a page that offers or names another currency, is in that
- * currency.
+ * reading in guaraníes whose printed figures carry them, on a page that offers
+ * or names another currency, is in that currency.
  */
 export function settledCurrency(x: Extraction, ocr: ParsedReceipt | null, text: string): Extraction {
   const other = ocr?.foreignCurrency ?? ocr?.currencyChoice ?? null;
   if (x.moneda !== 'PYG' || !other) return x;
-  const cents =
-    hasCents([x.total, x.gravada5, x.gravada10, x.exentas, x.iva5, x.iva10, x.totalIva]) ||
-    CENTS_IN_WORDS.test(text.toLowerCase());
-  if (!cents) return x;
+  if (!centsPrinted([x.total, x.gravada5, x.gravada10, x.exentas, x.iva5, x.iva10, x.totalIva], text)) {
+    return x;
+  }
   const moneda = (['USD', 'BRL', 'EUR'] as const).find((c) => c === other) ?? 'OTRA';
   return { ...x, moneda };
 }
 
 /**
- * Whether the page shows a reading's figures are not guaraníes: cents, in the
- * figures or in the total written out, or an exchange rate the printed
- * guaraní total confirms (see fromExtraction).
+ * Whether the page shows a reading's figures are not guaraníes: cents printed
+ * in them, or an exchange rate the printed guaraní total confirms (see
+ * witnessed).
  *
  * Where the form only offers the currency, the model's word is all that says
  * "dollars", and a Gs 900.000 invoice read as USD 900.000 would go into the
  * IVA some six thousand times over.
  */
 function foreignShown(r: ParsedReceipt, text: string): boolean {
-  return (
-    r.tipoCambio != null ||
-    hasCents([r.total, r.gravada5, r.gravada10, r.exentas, r.iva5, r.iva10]) ||
-    CENTS_IN_WORDS.test(text.toLowerCase())
-  );
+  return r.tipoCambio != null || centsPrinted([r.total, r.gravada5, r.gravada10, r.exentas, r.iva5, r.iva10], text);
 }
+
+/**
+ * The least a guaraní invoice on a form that also offers dollars is taken to
+ * be. Below it the figures say nothing: USD 1.100 with an IVA of 100 — a rent
+ * of "1.000 más IVA" — reads the same in guaraníes, and only the tick tells
+ * them apart.
+ */
+const LEAST_GUARANIES_ON_A_CHOICE = 20_000;
 
 /**
  * The parser's reading in the currency the model saw ticked, where the form
  * only offers it — or 'open' when nothing settles it.
  *
- * A foreign currency needs the page to show something a guaraní amount cannot
- * have, and the model's own figures to hold in it: the parser's are read the
- * guaraní way, and must never go on record as dollars on the model's word
- * alone. With no model there is nothing to say which box is ticked.
+ * Either answer needs more than the model's word, and its own figures have to
+ * hold in the currency it gave. Dollars need the page to show something a
+ * guaraní amount cannot have; the parser's figures are read the guaraní way
+ * and must never go on record as dollars on the model's say-so. Guaraníes need
+ * a total a dollar invoice of the same figures is not — the model missed the
+ * tick on a dollar receipt once already. And the currency has to be one the
+ * form offers. With no model there is nothing to say which box is ticked.
  */
 function choiceSettled(
   ocr: ParsedReceipt | null,
@@ -782,10 +822,23 @@ function choiceSettled(
   text: string,
 ): ParsedReceipt | null | 'open' {
   if (!ocr || ocr.foreignCurrency != null || !ocr.currencyChoice) return ocr;
-  if (!model) return 'open';
+  if (!model || !amountsSound(model)) return 'open';
   const chosen = model.foreignCurrency;
-  if (chosen != null && (!foreignShown(model, text) || !amountsSound(model))) return 'open';
+  if (chosen != null && (chosen !== ocr.currencyChoice || !foreignShown(model, text))) return 'open';
+  if (chosen == null && (model.total ?? 0) < LEAST_GUARANIES_ON_A_CHOICE) return 'open';
   return { ...ocr, foreignCurrency: chosen, currencyChoice: null };
+}
+
+/**
+ * The parser's reading without an issuer that is the user. The user is the
+ * buyer of what he photographs (see witnessed), and the parser, skipping an
+ * issuer's RUC it misread, could take the next one in the header — the
+ * customer block's — and file a purchase as a sale, its IVA moved from credit
+ * to debit. A CDC would settle it; a paper invoice has none.
+ */
+function buyerAsIssuerDropped(ocr: ParsedReceipt | null, ownRuc: string | null): ParsedReceipt | null {
+  if (!ocr || !ownRuc || ocr.cdc || ocr.emisorRuc !== ownRuc) return ocr;
+  return recounted({ ...ocr, emisorRuc: null, emisorDv: null, emisorNombre: null });
 }
 
 /** What one reader saw that the other's amounts cannot overrule. */
@@ -819,12 +872,14 @@ export function decidePhoto(
   ownRuc: string | null = null,
   rows: string[] = [],
 ): PhotoDecision {
-  const ai = aiRead ? witnessed(aiRead, text, ownRuc, ocrRead, rows) : null;
-  const settled = choiceSettled(ocrRead, ai?.reading ?? null, text);
+  const parsed = buyerAsIssuerDropped(ocrRead, ownRuc);
+  const ai = aiRead ? witnessed(aiRead, text, ownRuc, parsed, rows) : null;
+  const settled = choiceSettled(parsed, ai?.reading ?? null, text);
   if (settled === 'open') {
-    return { kind: 'refuse', reason: 'moneda', reading: ai?.reading ?? ocrRead, detail: 'choice' };
+    return { kind: 'refuse', reason: 'moneda', reading: ai?.reading ?? parsed, detail: 'choice' };
   }
   const ocr = settled;
+  const texts = [text, ...rows.filter((t) => t && t !== text)];
 
   const veto = vetoed(ocr, ai?.reading ?? null);
   if (veto) return veto;
@@ -839,13 +894,13 @@ export function decidePhoto(
     return { kind: 'refuse', reason: 'lecturas', reading: ocr, detail: 'amounts' };
   }
   if (ocrSound && aiSound) {
-    return stored(identified(ocr, ocr, ai.reading), 'ocr+ai', text);
+    return stored(identified(ocr, ocr, ai.reading), 'ocr+ai', texts);
   }
   if (ocrSound) {
-    return stored(identified(ocr, ocr, ai?.reading ?? null), 'ocr', text);
+    return stored(identified(ocr, ocr, ai?.reading ?? null), 'ocr', texts);
   }
   if (aiSound && ai.seen) {
-    return stored(identified(ai.reading, ocr, ai.reading), 'ai', text);
+    return stored(identified(ai.reading, ocr, ai.reading), 'ai', texts);
   }
 
   const basis = ocr ?? ai?.reading ?? null;

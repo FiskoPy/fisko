@@ -205,7 +205,7 @@ function firstNumberAfter(low: string, label: RegExp): number | null {
   // A column's rate is not an amount: the item table's heading "EXENTAS 5%
   // 10%" put Gs 5 on record as exempt, and 5 Gs short in the base, on two
   // invoices (2026-09-21).
-  for (const m of rest.matchAll(/(\d{1,3}(?:\.\d{3})+(?:,\d+)?|\d+(?:,\d+)?)(?![\d.,])(\s*%)?/g)) {
+  for (const m of rest.matchAll(/(\d{1,3}(?:\.\d{3})+(?:,\d+)?|\d+(?:,\d+)?)(?!\d|[.,]\d)(\s*%)?/g)) {
     if (!m[2]) return parseAmount(m[1] as string);
   }
   return null;
@@ -216,17 +216,26 @@ function firstNumberAfter(low: string, label: RegExp): number | null {
  *
  * Vision split the buyer's "80175384-8" as "80 175384-8", and "175384-8" was
  * filed as the issuer of a diesel ticket (2026-09-21); 175384's check digit
- * is 3. An issuer's RUC whose digit does not check is a misreading, and the
- * next one is looked at. The buyer's is only read, never filed under.
+ * is 3. So an issuer's RUC is not read off the customer's line, and one whose
+ * digit does not check is a misreading — with nothing read rather than the
+ * next RUC in the header, which is the customer block's when a ticket prints
+ * it there, and would file a purchase as the user's own sale. The buyer's is
+ * only read, never filed under.
  */
-function findRuc(text: string, checked = false): { ruc: string; dv: number } | null {
-  for (const m of text.matchAll(/(?<![\d-])(\d{5,8})\s*[-–]\s*(\d)(?![\d-])/g)) {
+function findRuc(text: string, issuer = false): { ruc: string; dv: number } | null {
+  for (const line of text.split(/\r?\n/)) {
+    if (issuer && BUYER_LABEL.test(line)) continue;
+    const m = line.match(/(?<![\d-])(\d{5,8})\s*[-–]\s*(\d)(?![\d-])/);
+    if (!m) continue;
     const ruc = m[1] as string;
     const dv = Number(m[2]);
-    if (!checked || isValidRucDv(ruc, dv)) return { ruc, dv };
+    return !issuer || isValidRucDv(ruc, dv) ? { ruc, dv } : null;
   }
   return null;
 }
+
+/** A line that names the customer. */
+const BUYER_LABEL = /client|se[ñn]or|raz[oó]n\s*social|nombre|comprador|receptor/i;
 
 // ---------------------------------------------------------------------------
 // Fiscal footer
@@ -698,8 +707,24 @@ const NOT_CURRENCY = /cotiza|tipo\s*de\s*cambio|cambio\s*del\s*dia|@|www\./;
  */
 const guaraniOffered = (line: string): boolean => {
   const low = norm(line);
-  return !NOT_CURRENCY.test(low) && /(?<!\ben\s{0,3})\bguarani(?!\w*\s*:)/.test(low);
+  // Nor as the label of a figure: "Guaraníes 6.630.712" under a dollar total.
+  return (
+    !NOT_CURRENCY.test(low) && /(?<!\ben\s{0,3})\bguarani(?!\w*\s*[:.]?\s*(?:gs\.?\s*)?\d)(?!\w*\s*:)/.test(low)
+  );
 };
+
+/** The currency a "Moneda" label names — what the page states, not offers. */
+function labelledCurrency(lines: string[]): string | null {
+  for (let i = 0; i < lines.length; i++) {
+    const labelled = norm(lines[i] as string).match(/\bmoneda\b\W*(.*)$/);
+    if (!labelled) continue;
+    const value = ((labelled[1] as string).trim() || norm(lines[i + 1] ?? '')).slice(0, 24);
+    if (GUARANI.test(value)) return 'PYG';
+    const found = CURRENCIES.find(([, re]) => re.test(value));
+    if (found) return found[0] as string;
+  }
+  return null;
+}
 
 /**
  * The currency the page names when it is not the guaraní — or null.
@@ -723,15 +748,8 @@ const guaraniOffered = (line: string): boolean => {
  * the other beside it, are that choice — `choice`, not `currency`.
  */
 function readForeignCurrency(lines: string[]): { currency: string | null; choice: string | null } {
-  for (let i = 0; i < lines.length; i++) {
-    const low = norm(lines[i] as string);
-    const labelled = low.match(/\bmoneda\b\W*(.*)$/);
-    if (!labelled) continue;
-    const value = ((labelled[1] as string).trim() || norm(lines[i + 1] ?? '')).slice(0, 24);
-    if (GUARANI.test(value)) return { currency: null, choice: null };
-    const found = CURRENCIES.find(([, re]) => re.test(value));
-    if (found) return { currency: found[0] as string, choice: null };
-  }
+  const labelled = labelledCurrency(lines);
+  if (labelled) return { currency: labelled === 'PYG' ? null : labelled, choice: null };
   let choice: string | null = null;
   for (let i = 0; i < lines.length; i++) {
     const low = norm(lines[i] as string);
@@ -1199,8 +1217,13 @@ export function parseBest(
   // total's line; Vision's blocks leave them on lines of their own. It is the
   // same page either way: where one layout saw the form offer the currency,
   // another that read it as stated read the same printed words.
+  // Never over what a "Moneda" label states, in any layout: the label's value
+  // falls to the next line in one and stays beside it in another.
   const offered = readings.find((r) => r.parsed.currencyChoice)?.parsed.currencyChoice ?? null;
-  if (offered && (p.foreignCurrency == null || p.foreignCurrency === offered)) {
+  const stated = readings.some((r) => labelledCurrency(r.text.split(/\r?\n/)) != null);
+  if (stated) {
+    p.currencyChoice = null;
+  } else if (offered && (p.foreignCurrency == null || p.foreignCurrency === offered)) {
     p.foreignCurrency = null;
     p.currencyChoice = offered;
   }

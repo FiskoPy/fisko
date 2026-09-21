@@ -446,6 +446,11 @@ async function dnitRate(moneda: string, issued: Date, tipo: 'venta' | 'compra'):
         `Esta factura está en ${name} y no trae su tipo de cambio. Se convierte con la cotización ` +
           `de la DNIT del día anterior (${d}/${m}/${y}), que todavía no está publicada. Probá de nuevo mañana.`,
       );
+    case 'ilegible':
+      throw AppError.badRequest(
+        `Esta factura está en ${name} y no trae su tipo de cambio, y no pudimos leer la cotización ` +
+          `de la DNIT del ${d}/${m}/${y}. Cargala con su XML, o avisá al soporte.`,
+      );
     default:
       throw AppError.badRequest(
         `Esta factura está en ${name} y no trae su tipo de cambio. Se convierte con la cotización ` +
@@ -497,7 +502,13 @@ export async function setTipo(
   let rate: { tipoCambio: number } | Record<string, never> = {};
   if (invoice.tipoCambioFuente === 'dnit') {
     const side = ledgerSideOf({ emisorRuc: invoice.emisorRuc, esVenta }, ownRuc).tipo;
-    rate = { tipoCambio: (await dnitRate(invoice.moneda, invoice.fechaEmision, side)).rate };
+    // The side is the person's to correct whatever the DNIT's site is doing:
+    // with the page down, the rate stays as it was and the side changes.
+    try {
+      rate = { tipoCambio: (await dnitRate(invoice.moneda, invoice.fechaEmision, side)).rate };
+    } catch (err) {
+      logger.warn({ err: (err as Error).message }, 'set-tipo: DNIT rate kept, not recomputed');
+    }
   }
   const updated = await prisma.invoice.update({
     where: { id },

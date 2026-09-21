@@ -28,14 +28,19 @@ export interface OfficialRate {
   side: RateSide;
 }
 
-export type RateMiss = 'moneda' | 'pendiente' | 'sin-conexion';
+export type RateMiss = 'moneda' | 'pendiente' | 'ilegible' | 'sin-conexion';
 
 type DayRates = Map<string, { compra: number; venta: number }>;
 
 const PAGE = 'https://www.dnit.gov.py/web/portal-institucional/cotizaciones';
-const TIMEOUT_MS = 20_000;
-/** The table gains a row each business day; older months never change. */
+/** Vision can take 25 s of the app's 60: the rate gets what is left, and less. */
+const TIMEOUT_MS = 10_000;
+/** A day not in the table yet is looked for again after this long… */
 const FRESH_MS = 60 * 60 * 1000;
+/** …and the table is read again after this, for a row the DNIT corrected. */
+const STALE_MS = 12 * 60 * 60 * 1000;
+/** After a failed read, the page is left alone this long: an outage is not retried per invoice. */
+const BACKOFF_MS = 5 * 60 * 1000;
 
 /** The table's column headings, and the currency each one is. */
 const COLUMNS: [RegExp, string][] = [
@@ -60,10 +65,17 @@ const cellsOf = (row: string): string[] =>
       .trim(),
   );
 
-/** "5.921,39" → 5921.39 */
+/**
+ * "5.921,39" → 5921.39 — and "7,299.26", the way the DNIT wrote a few days
+ * (15-17/03/2024, 31/05/2021, 29/07-02/08/2020): the last separator with one
+ * or two digits after it is the decimal point.
+ */
 const rateOf = (cell: string | undefined): number | null => {
-  if (!cell || !/^\d{1,3}(?:\.\d{3})*(?:,\d+)?$|^\d+(?:,\d+)?$/.test(cell)) return null;
-  const n = Number(cell.replace(/\./g, '').replace(',', '.'));
+  const s = cell?.trim() ?? '';
+  if (!/^\d[\d.,]*$/.test(s)) return null;
+  const decimal = s.match(/[.,](\d{1,2})$/);
+  const whole = (decimal ? s.slice(0, -decimal[0].length) : s).replace(/[.,]/g, '');
+  const n = Number(decimal ? `${whole}.${decimal[1]}` : whole);
   return Number.isFinite(n) && n > 0 ? n : null;
 };
 
@@ -109,6 +121,7 @@ export function parseDnitRates(html: string): DayRates {
 }
 
 let cache: { at: number; rates: DayRates } | null = null;
+let failedAt = 0;
 
 async function fetchRates(): Promise<DayRates | null> {
   if (env.DNIT_RATES === 'off') return null;
@@ -134,12 +147,18 @@ async function fetchRates(): Promise<DayRates | null> {
   }
 }
 
-async function ratesTable(fresh: boolean): Promise<DayRates | null> {
-  if (cache && (!fresh || Date.now() - cache.at < FRESH_MS)) return cache.rates;
+/**
+ * The table, read again when it is older than [maxAge] — unless the page
+ * failed a moment ago. A stale table still answers for the days it has.
+ */
+async function ratesTable(maxAge: number): Promise<{ rates: DayRates | null; read: boolean }> {
+  const now = Date.now();
+  if (cache && now - cache.at < maxAge) return { rates: cache.rates, read: false };
+  if (now - failedAt < BACKOFF_MS) return { rates: cache?.rates ?? null, read: false };
   const rates = await fetchRates();
   if (rates) cache = { at: Date.now(), rates };
-  // A stale table still answers for the days it has.
-  return cache?.rates ?? null;
+  else failedAt = Date.now();
+  return { rates: cache?.rates ?? null, read: true };
 }
 
 const dayBefore = (d: Date): Date => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - 1));
@@ -149,9 +168,11 @@ const ymdOf = (d: Date): string => d.toISOString().slice(0, 10);
  * The close to use for [currency] on an invoice issued on [issued]: the row
  * of the day before.
  *
- * A row the table lacks inside its range is a holiday, and carries the last
- * close before it. Past its last row, the day is not published yet; only a
- * weekend in between carries a close it already has.
+ * The DNIT prints a row for every calendar day, holidays and weekends
+ * carrying the last business close — so a day missing inside the table is a
+ * row that could not be read, not a holiday, and an older close is not taken
+ * for it. Past the last row, the day is not published yet; only a weekend in
+ * between carries a close the table already has.
  */
 export function pickRate(
   rates: DayRates,
@@ -163,21 +184,18 @@ export function pickRate(
   if (!days.length) return 'moneda';
   const last = days.reduce((a, b) => (a > b ? a : b));
   const want = dayBefore(issued);
+  const date = ymdOf(want);
 
-  for (let back = 0; back <= 6; back++) {
-    const day = new Date(want.getTime() - back * 86_400_000);
-    const ymd = ymdOf(day);
-    if (ymd > last) {
-      // Not published yet: fine only if the day is a Saturday or a Sunday,
-      // which carries Friday's close anyway.
-      const weekday = day.getUTCDay();
-      if (weekday !== 0 && weekday !== 6) return 'pendiente';
-      continue;
-    }
-    const row = rates.get(`${ymd}|${currency}`);
-    if (row) return { rate: row[side], date: ymdOf(want), side };
+  if (date <= last) {
+    const row = rates.get(`${date}|${currency}`);
+    return row ? { rate: row[side], date, side } : 'ilegible';
   }
-  return 'pendiente';
+  for (let day = want; ymdOf(day) > last; day = dayBefore(day)) {
+    const weekday = day.getUTCDay();
+    if (weekday !== 0 && weekday !== 6) return 'pendiente';
+  }
+  const row = rates.get(`${last}|${currency}`);
+  return row ? { rate: row[side], date, side } : 'ilegible';
 }
 
 /** The official close for an invoice, or why there is none. */
@@ -186,17 +204,19 @@ export async function officialRate(
   issued: Date,
   side: RateSide,
 ): Promise<OfficialRate | RateMiss> {
-  const cached = await ratesTable(false);
-  let picked = cached ? pickRate(cached, currency, issued, side) : 'sin-conexion';
-  // The day may have been published since the table was read.
-  if (picked === 'pendiente' || picked === 'sin-conexion') {
-    const fresh = await ratesTable(true);
-    if (fresh) picked = pickRate(fresh, currency, issued, side);
+  const first = await ratesTable(STALE_MS);
+  let picked = first.rates ? pickRate(first.rates, currency, issued, side) : 'sin-conexion';
+  // The day may have been published since the table was read — once per
+  // lookup, and not when this lookup has just read it.
+  if (!first.read && (picked === 'pendiente' || picked === 'sin-conexion')) {
+    const again = await ratesTable(FRESH_MS);
+    if (again.rates) picked = pickRate(again.rates, currency, issued, side);
   }
   return picked;
 }
 
-/** For tests: forget the table read so far. */
+/** For tests: forget the table read so far, and any failure. */
 export function resetRatesCache(rates: DayRates | null = null): void {
   cache = rates ? { at: Date.now(), rates } : null;
+  failedAt = 0;
 }

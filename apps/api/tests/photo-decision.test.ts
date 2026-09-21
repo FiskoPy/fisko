@@ -118,6 +118,35 @@ describe('when only one reader holds up', () => {
   });
 });
 
+describe('the rate a dollar invoice prints', () => {
+  const rows = (name: VisionFixture) =>
+    layoutsOf(visionFixture(name))
+      .map((l) => l.text ?? '')
+      .filter(Boolean);
+
+  it("is not stored when the printed guaraní total does not confirm the model's", () => {
+    const { parsed, text } = photo('rrtop-usd-kude');
+    for (const tipoCambio of [6_072.92, 7_000]) {
+      // A rate misread, or made up — with a guaraní total worked out to fit it.
+      const wrong = model('usd-rrtop', { tipoCambio, totalEnGuaranies: 1_538 * tipoCambio });
+      const decision = decidePhoto(parsed, wrong, text, '80175384', rows('rrtop-usd-kude'));
+      expect(decision).toMatchObject({ kind: 'refuse', reason: 'moneda', detail: 'rate' });
+    }
+  });
+
+  it('is found however the label and the figure are laid out', () => {
+    const { parsed, text } = photo('rrtop-usd-kude');
+    const noRate = model('usd-rrtop', { tipoCambio: null, totalEnGuaranies: null });
+    for (const printed of ['Cotizacion:\n6.027,92Gs.', 'Tipo Cambio: 6.027,92', 'T. Cambio 6.027,92']) {
+      const page = text.replace('Cotizacion: 6.027,92Gs.', printed);
+      expect(`${printed}: ${decidePhoto(parsed, noRate, page, '80175384').kind}`).toBe(`${printed}: refuse`);
+    }
+    // The clause about paying at the day's rate is not a rate.
+    const clause = text.replace('Cotizacion: 6.027,92Gs.', 'al tipo de cambio del dia 18/08/2026');
+    expect(decidePhoto(parsed, noRate, clause, '80175384')).toMatchObject({ kind: 'store' });
+  });
+});
+
 describe('what one reader saw that the other cannot overrule', () => {
   it('a dollar invoice the model read as guaraníes is refused, not stored as Gs 1.538', () => {
     const { parsed, text } = photo('rrtop-usd-kude');

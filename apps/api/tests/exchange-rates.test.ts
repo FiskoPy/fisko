@@ -1,8 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { env } from '../src/config/env';
 import {
   officialRate,
   parseDnitRates,
@@ -34,6 +35,15 @@ describe("the DNIT's table", () => {
 
   it('reads nothing from a page that is not the table', () => {
     expect(parseDnitRates('<html><body>Mantenimiento</body></html>').size).toBe(0);
+  });
+
+  it('reads a day the DNIT wrote the other way round', () => {
+    // 15-17/03/2024 were published as "7,299.26".
+    const page = html.replace(
+      '<td align="center">5.909,01</td>',
+      '<td align="center">5,909.01</td>',
+    );
+    expect(parseDnitRates(page).get('2026-09-01|USD')).toEqual({ compra: 5909.01, venta: 5919.15 });
   });
 });
 
@@ -72,6 +82,14 @@ describe('the rate for an invoice', () => {
     expect(pickRate(rates, 'OTRA', day('2026-08-31'), 'venta')).toBe('moneda');
   });
 
+  it('does not take an older close for a day it could not read', () => {
+    // Every calendar day has a row; one missing inside the table was
+    // unreadable, not a holiday.
+    const gap = new Map(rates);
+    gap.delete('2026-08-30|USD');
+    expect(pickRate(gap, 'USD', day('2026-08-31'), 'venta')).toBe('ilegible');
+  });
+
   it("says so when the DNIT's page cannot be read", async () => {
     // Tests never reach the site (DNIT_RATES=off), as production cannot when it is down.
     await expect(officialRate('USD', day('2026-08-31'), 'venta')).resolves.toBe('sin-conexion');
@@ -79,5 +97,19 @@ describe('the rate for an invoice', () => {
     await expect(officialRate('USD', day('2026-08-31'), 'venta')).resolves.toMatchObject({
       rate: 5921.39,
     });
+  });
+
+  it('does not ask a site that is down again for every invoice', async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new Error('connect ETIMEDOUT'));
+    vi.stubGlobal('fetch', fetchMock);
+    env.DNIT_RATES = 'on';
+    try {
+      await expect(officialRate('USD', day('2026-08-31'), 'venta')).resolves.toBe('sin-conexion');
+      await expect(officialRate('USD', day('2026-09-01'), 'venta')).resolves.toBe('sin-conexion');
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally {
+      env.DNIT_RATES = 'off';
+      vi.unstubAllGlobals();
+    }
   });
 });
