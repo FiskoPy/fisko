@@ -83,6 +83,16 @@ class InvoicesApi {
     return Invoice.fromJson(res.data!['invoice'] as Map<String, dynamic>);
   }
 
+  /// Sets the exchange rate of an invoice that printed none: typed by hand,
+  /// or back to the DNIT's close (null).
+  Future<Invoice> setTipoCambio(String id, double? tipoCambio) async {
+    final res = await _dio.patch<Map<String, dynamic>>(
+      '/invoices/$id/tipo-cambio',
+      data: {'tipoCambio': tipoCambio},
+    );
+    return Invoice.fromJson(res.data!['invoice'] as Map<String, dynamic>);
+  }
+
   Future<void> delete(String id) async {
     await _dio.delete<Map<String, dynamic>>('/invoices/$id');
   }

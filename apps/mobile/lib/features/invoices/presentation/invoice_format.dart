@@ -1,5 +1,14 @@
 export '../../../core/format.dart'
-    show formatGs, formatMoney, formatDocDate, formatConverted, formatMonth, formatMonthLong;
+    show
+        formatGs,
+        formatMoney,
+        formatDocDate,
+        formatConverted,
+        formatMonth,
+        formatMonthLong,
+        formatRate,
+        formatIsoDay,
+        parseRate;
 
 /// Maps the SIFEN document type code (iTiDE) to a short Spanish label.
 String tipoDocLabel(int tipoDoc, String? fallback) {

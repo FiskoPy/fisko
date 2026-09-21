@@ -38,6 +38,28 @@ String? formatConverted(num value, String? moneda, num? tipoCambio) {
   return '≈ ${formatGs(value * tipoCambio)} · cambio ${_money.format(tipoCambio)}';
 }
 
+/// An exchange rate as it is written here: "5.921,39".
+String formatRate(num rate) => _money.format(rate);
+
+/// "2026-08-30" → "30/08/2026".
+String formatIsoDay(String ymd) {
+  final p = ymd.split('-');
+  return p.length == 3 ? '${p[2]}/${p[1]}/${p[0]}' : ymd;
+}
+
+/// A rate typed by hand, the way it is written here or not: "5.921,39",
+/// "5921,39", "5921.39", "5.921". Null when it is not a positive number.
+double? parseRate(String input) {
+  var s = input.replaceAll(RegExp(r'\s'), '');
+  if (s.contains(',')) {
+    s = s.replaceAll('.', '').replaceAll(',', '.');
+  } else if (RegExp(r'^\d{1,3}(\.\d{3})+$').hasMatch(s)) {
+    s = s.replaceAll('.', '');
+  }
+  final v = double.tryParse(s);
+  return v != null && v > 0 ? v : null;
+}
+
 /// An instant — when something happened on the server — in the phone's zone.
 String formatDate(DateTime d) => _date.format(d.toLocal());
 

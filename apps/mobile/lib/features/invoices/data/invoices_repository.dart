@@ -24,6 +24,8 @@ class InvoicesRepository {
   Future<Invoice> detail(String id) => _run(() => _api.detail(id));
   Future<Invoice> setCategoria(String id, String? categoria) =>
       _run(() => _api.setCategoria(id, categoria));
+  Future<Invoice> setTipoCambio(String id, double? tipoCambio) =>
+      _run(() => _api.setTipoCambio(id, tipoCambio));
   Future<void> delete(String id) => _run(() => _api.delete(id));
 
   Future<T> _run<T>(Future<T> Function() action) async {

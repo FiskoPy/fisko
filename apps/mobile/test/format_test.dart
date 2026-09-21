@@ -26,4 +26,29 @@ void main() {
       expect(formatDocDate(DateTime.parse('2026-09-12T00:00:00.000Z')), '12/09/2026');
     });
   });
+
+  // A rate typed by hand, written the way it is here or not: a "." read as a
+  // decimal point would make 5.921 guaraníes per dollar 5,921.
+  group('parseRate', () {
+    test('reads the local way of writing it', () {
+      expect(parseRate('5.921,39'), 5921.39);
+      expect(parseRate('5921,39'), 5921.39);
+      expect(parseRate('5.921'), 5921);
+    });
+
+    test('reads the other way too', () {
+      expect(parseRate('5921.39'), 5921.39);
+      expect(parseRate(' 6030 '), 6030);
+    });
+
+    test('is nothing when it is not a positive number', () {
+      expect(parseRate(''), isNull);
+      expect(parseRate('abc'), isNull);
+      expect(parseRate('0'), isNull);
+    });
+  });
+
+  test('formatIsoDay writes the day the way it is read here', () {
+    expect(formatIsoDay('2026-08-30'), '30/08/2026');
+  });
 }

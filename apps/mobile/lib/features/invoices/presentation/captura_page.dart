@@ -90,15 +90,28 @@ class CapturaPage extends ConsumerWidget {
       // There is no editing yet, so the honest remedy is: look at it, and if it
       // came out wrong, delete it and shoot the photo again.
       final String msg;
+      final inv = out.invoice;
       // A date read off handwriting whose month the page could not confirm is
       // stored and flagged, not refused: everything else on it was verified.
-      final revisar = out.missing.where((m) => m.startsWith('Fecha (')).toList();
-      if (revisar.isNotEmpty) {
-        msg = 'Importada. Revisá la fecha: leímos el día y el año, pero no pudimos '
-            'confirmar el mes escrito a mano.';
-      } else if (out.missing.isNotEmpty) {
-        msg = 'Importada, pero no pudimos leer: ${out.missing.join(", ")}. '
-            'Revisala; si quedó mal, borrala y sacá la foto de nuevo.';
+      final revisarFecha = out.missing.any((m) => m.startsWith('Fecha ('));
+      // A foreign invoice that printed no rate goes in at the DNIT's close of
+      // the day before — the law's rate, not one read off the paper.
+      final cotizacionDnit = out.missing.any((m) => m.startsWith('Tipo de cambio ('));
+      final sinLeer = out.missing
+          .where((m) => !m.startsWith('Fecha (') && !m.startsWith('Tipo de cambio ('))
+          .toList();
+      final notas = <String>[
+        if (revisarFecha)
+          'Revisá la fecha: leímos el día y el año, pero no pudimos confirmar el mes escrito a mano.',
+        if (cotizacionDnit && inv.tipoCambio != null)
+          'No traía tipo de cambio: la convertimos con la cotización de la DNIT'
+              '${inv.tipoCambioFecha != null ? ' del ${formatIsoDay(inv.tipoCambioFecha!)}' : ''} '
+              '(${formatRate(inv.tipoCambio!)}).',
+        if (sinLeer.isNotEmpty)
+          'No pudimos leer: ${sinLeer.join(", ")}. Revisala; si quedó mal, borrala y sacá la foto de nuevo.',
+      ];
+      if (notas.isNotEmpty) {
+        msg = 'Importada. ${notas.join(' ')}';
       } else if (out.confidence < 0.7) {
         msg = 'Importada, pero la foto se leyó con dificultad. Revisá los montos.';
       } else {

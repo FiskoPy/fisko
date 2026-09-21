@@ -106,24 +106,8 @@ class _Detail extends ConsumerWidget {
                     )),
           ],
         ),
-        // In guaraníes, at the rate printed on the invoice: that is the figure
-        // this factura carries into the month's IVA.
-        if (formatConverted(inv.totalOpe, inv.moneda, inv.tipoCambio) case final converted?)
-          Align(
-            alignment: Alignment.centerRight,
-            child: Text(
-              converted,
-              style: TextStyle(color: Theme.of(context).colorScheme.outline),
-            ),
-          )
-        else if ((inv.moneda).toUpperCase() != 'PYG')
-          Align(
-            alignment: Alignment.centerRight,
-            child: Text(
-              'Sin tipo de cambio: queda fuera de los totales en guaraníes.',
-              style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12),
-            ),
-          ),
+        // In guaraníes: the figure this factura carries into the month's IVA.
+        if ((inv.moneda).toUpperCase() != 'PYG') _TipoCambioRow(invoice: inv),
         const Divider(height: 24),
         Text('Ítems (${inv.items?.length ?? 0})',
             style: Theme.of(context).textTheme.titleMedium),
@@ -148,6 +132,126 @@ class _Detail extends ConsumerWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// A foreign invoice in guaraníes, and where its rate came from: the invoice
+/// itself, the DNIT's close of the day before (the law's rate when the
+/// invoice prints none), or typed by hand — which can be corrected here.
+class _TipoCambioRow extends ConsumerStatefulWidget {
+  const _TipoCambioRow({required this.invoice});
+
+  final Invoice invoice;
+
+  @override
+  ConsumerState<_TipoCambioRow> createState() => _TipoCambioRowState();
+}
+
+class _TipoCambioRowState extends ConsumerState<_TipoCambioRow> {
+  bool _saving = false;
+
+  /// A rate the invoice itself carries is the one the law takes, and stays.
+  bool get _editable => widget.invoice.tipoCambioFuente != null || widget.invoice.tipoCambio == null;
+
+  Future<void> _edit() async {
+    final inv = widget.invoice;
+    final field = TextEditingController(
+      text: inv.tipoCambio != null ? formatRate(inv.tipoCambio!) : '',
+    );
+    // '__dnit__' goes back to the DNIT's close; a number is typed by hand.
+    final chosen = await showDialog<Object>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Tipo de cambio'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Guaraníes por cada ${inv.moneda}.'),
+            const SizedBox(height: 8),
+            TextField(
+              controller: field,
+              autofocus: true,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(hintText: 'Ej.: 5.921,39'),
+            ),
+          ],
+        ),
+        actions: [
+          if (inv.tipoCambioFuente != 'dnit')
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, '__dnit__'),
+              child: const Text('Usar cotización DNIT'),
+            ),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancelar')),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, parseRate(field.text) ?? '__invalid__'),
+            child: const Text('Guardar'),
+          ),
+        ],
+      ),
+    );
+    field.dispose();
+    if (chosen == null || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    if (chosen == '__invalid__') {
+      messenger.showSnackBar(const SnackBar(content: Text('Escribí el tipo de cambio, por ejemplo 5.921,39.')));
+      return;
+    }
+
+    setState(() => _saving = true);
+    try {
+      await ref
+          .read(invoicesRepositoryProvider)
+          .setTipoCambio(inv.id, chosen == '__dnit__' ? null : chosen as double);
+      ref.invalidate(invoiceDetailProvider(inv.id));
+      ref.read(invoicesControllerProvider.notifier).refreshAfterChange();
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(friendlyError(e))));
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final inv = widget.invoice;
+    final theme = Theme.of(context);
+    final converted = formatConverted(inv.totalOpe, inv.moneda, inv.tipoCambio);
+    final source = switch (inv.tipoCambioFuente) {
+      // A purchase is converted at the selling rate, a sale at the buying one.
+      'dnit' => 'La factura no trae tipo de cambio: cotización DNIT '
+          '(${inv.tipo == 'venta' ? 'compra' : 'venta'}) del '
+          '${inv.tipoCambioFecha != null ? formatIsoDay(inv.tipoCambioFecha!) : 'día anterior'}.',
+      'manual' => 'Tipo de cambio cargado a mano.',
+      _ => null,
+    };
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        Text(
+          converted ?? 'Sin tipo de cambio: queda fuera de los totales en guaraníes.',
+          style: converted != null
+              ? TextStyle(color: theme.colorScheme.outline)
+              : TextStyle(color: theme.colorScheme.error, fontSize: 12),
+        ),
+        if (source != null)
+          Text(source,
+              textAlign: TextAlign.end,
+              style: TextStyle(color: theme.colorScheme.outline, fontSize: 12)),
+        if (_editable)
+          _saving
+              ? const Padding(
+                  padding: EdgeInsets.all(8),
+                  child: SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+                )
+              : TextButton.icon(
+                  onPressed: _edit,
+                  icon: const Icon(Icons.edit_outlined, size: 16),
+                  label: const Text('Corregir tipo de cambio'),
+                ),
+      ],
     );
   }
 }

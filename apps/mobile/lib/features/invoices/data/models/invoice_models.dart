@@ -44,6 +44,10 @@ class Invoice with _$Invoice {
     // Guaraníes per unit of [moneda]. Null for a guaraní invoice, and for a
     // foreign one loaded before the reader could read its rate.
     double? tipoCambio,
+    // Where the rate came from when the invoice printed none: 'dnit' (the
+    // close the law names, of [tipoCambioFecha]) or 'manual'. Null: its own.
+    String? tipoCambioFuente,
+    String? tipoCambioFecha,
     required double totalOpe,
     required double totalIva,
     required double iva5,
