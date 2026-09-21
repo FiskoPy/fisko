@@ -511,10 +511,17 @@ export function decidePhoto(
   }
 
   const basis = ocr ?? ai?.reading ?? null;
+  // Why the model's reading did not carry the photo. Without this the log said
+  // only "no total found", which is the parser's story, and the model's side
+  // of a refusal could not be told apart from the model never answering —
+  // the client retried a handwritten talonario twice and we could not say
+  // which rule turned it down (2026-09-20).
+  const aiState =
+    ai == null ? 'none' : aiSound ? (ai.seen ? 'sound' : 'unseen') : (refusalOf(ai.reading) ?? 'none');
   return {
     kind: 'refuse',
     reason: (basis && refusalOf(basis)) ?? 'total',
     reading: basis,
-    ...(aiSound ? { detail: 'ai-unseen' } : {}),
+    detail: `ai:${aiState}`,
   };
 }

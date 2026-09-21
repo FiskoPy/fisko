@@ -316,7 +316,7 @@ describe('the model alone is held to what Vision saw', () => {
     expect(reading.totalsAgree).toBe(true);
 
     const decision = decidePhoto(parseReceipt(TEXT), reading, TEXT, BUYER);
-    expect(decision).toMatchObject({ kind: 'refuse', detail: 'ai-unseen' });
+    expect(decision).toMatchObject({ kind: 'refuse', detail: 'ai:unseen' });
   });
 
   it('refuses a tax figure the model worked out instead of reading', () => {
