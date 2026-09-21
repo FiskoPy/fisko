@@ -6,6 +6,7 @@ import {
   importXmlSchema,
   listInvoicesQuerySchema,
   setCategoriaSchema,
+  setTipoCambioSchema,
   setTipoSchema,
 } from './invoices.schemas';
 import * as invoicesService from './invoices.service';
@@ -54,6 +55,16 @@ export async function tipo(req: AuthedRequest, res: Response): Promise<void> {
     userId(req),
     (req as Request).params.id as string,
     body.tipo,
+  );
+  res.status(200).json({ invoice });
+}
+
+export async function tipoCambio(req: AuthedRequest, res: Response): Promise<void> {
+  const body = setTipoCambioSchema.parse(req.body);
+  const invoice = await invoicesService.setTipoCambio(
+    userId(req),
+    (req as Request).params.id as string,
+    body.tipoCambio,
   );
   res.status(200).json({ invoice });
 }

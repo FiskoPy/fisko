@@ -70,6 +70,14 @@ export interface ParsedReceipt {
    */
   foreignCurrency: string | null;
   /**
+   * The other currency a talonario offers beside the guaraní as a printed
+   * choice — "TOTAL A PAGAR Son: ☐ Guaraníes ☐ Dólares Americanos" — when the
+   * page states no currency otherwise. Which box is ticked is not in the text,
+   * so the currency is left to a reader that sees the page (see
+   * photo-decision).
+   */
+  currencyChoice: string | null;
+  /**
    * Guaraníes per unit of foreignCurrency — set only when a reader read the
    * rate and the printed guaraní total confirmed it (see fromExtraction).
    */
@@ -194,15 +202,30 @@ function firstNumberAfter(low: string, label: RegExp): number | null {
   const at = low.match(label);
   if (!at) return null;
   const rest = low.slice((at.index ?? 0) + at[0].length);
-  const m = rest.match(/(\d{1,3}(?:\.\d{3})+(?:,\d+)?|\d+(?:,\d+)?)/);
-  return m ? parseAmount(m[1] as string) : null;
+  // A column's rate is not an amount: the item table's heading "EXENTAS 5%
+  // 10%" put Gs 5 on record as exempt, and 5 Gs short in the base, on two
+  // invoices (2026-09-21).
+  for (const m of rest.matchAll(/(\d{1,3}(?:\.\d{3})+(?:,\d+)?|\d+(?:,\d+)?)(?![\d.,])(\s*%)?/g)) {
+    if (!m[2]) return parseAmount(m[1] as string);
+  }
+  return null;
 }
 
-/** RUC as printed: 5-8 digits plus a check digit. */
-function findRuc(text: string): { ruc: string; dv: number } | null {
-  const m = text.match(/(?<![\d-])(\d{5,8})\s*[-–]\s*(\d)(?![\d-])/);
-  if (!m) return null;
-  return { ruc: m[1] as string, dv: Number(m[2]) };
+/**
+ * RUC as printed: 5-8 digits plus a check digit — one that holds.
+ *
+ * Vision split the buyer's "80175384-8" as "80 175384-8", and "175384-8" was
+ * filed as the issuer of a diesel ticket (2026-09-21); 175384's check digit
+ * is 3. An issuer's RUC whose digit does not check is a misreading, and the
+ * next one is looked at. The buyer's is only read, never filed under.
+ */
+function findRuc(text: string, checked = false): { ruc: string; dv: number } | null {
+  for (const m of text.matchAll(/(?<![\d-])(\d{5,8})\s*[-–]\s*(\d)(?![\d-])/g)) {
+    const ruc = m[1] as string;
+    const dv = Number(m[2]);
+    if (!checked || isValidRucDv(ruc, dv)) return { ruc, dv };
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -669,6 +692,16 @@ const STATES_AMOUNT = /total|gravad|\biva\b|importe|subtotal|a\s*pagar|precio/;
 const NOT_CURRENCY = /cotiza|tipo\s*de\s*cambio|cambio\s*del\s*dia|@|www\./;
 
 /**
+ * "Guaraníes" printed as one of a form's options ("Son: ☐ Guaraníes ☐ Dólares
+ * Americanos") — not as the unit of another figure: a dollar KuDE prints
+ * "TOTAL EN GUARANIES:" under its total, and "su equivalente en guaranies".
+ */
+const guaraniOffered = (line: string): boolean => {
+  const low = norm(line);
+  return !NOT_CURRENCY.test(low) && /(?<!\ben\s{0,3})\bguarani(?!\w*\s*:)/.test(low);
+};
+
+/**
  * The currency the page names when it is not the guaraní — or null.
  *
  * Read in guaraníes, an invoice in dollars adds up just as well (1.538 over 11
@@ -682,24 +715,34 @@ const NOT_CURRENCY = /cotiza|tipo\s*de\s*cambio|cambio\s*del\s*dia|@|www\./;
  * reading those as the currency refuses a ticket that used to be stored right.
  * So: what the Moneda label names, and otherwise only what a line stating an
  * amount names.
+ *
+ * Nor is a currency the form offers. A talonario prints "TOTAL A PAGAR Son:
+ * ☐ Guaraníes ☐ Dólares Americanos", and the tick is not in the text: read as
+ * the currency, it filed a Gs 900.000 invoice as dollars and refused it four
+ * times (Cevelio, 2026-09-21). Both names on the line, or one on the line and
+ * the other beside it, are that choice — `choice`, not `currency`.
  */
-function readForeignCurrency(lines: string[]): string | null {
+function readForeignCurrency(lines: string[]): { currency: string | null; choice: string | null } {
   for (let i = 0; i < lines.length; i++) {
     const low = norm(lines[i] as string);
     const labelled = low.match(/\bmoneda\b\W*(.*)$/);
     if (!labelled) continue;
     const value = ((labelled[1] as string).trim() || norm(lines[i + 1] ?? '')).slice(0, 24);
-    if (GUARANI.test(value)) return null;
+    if (GUARANI.test(value)) return { currency: null, choice: null };
     const found = CURRENCIES.find(([, re]) => re.test(value));
-    if (found) return found[0] as string;
+    if (found) return { currency: found[0] as string, choice: null };
   }
-  for (const line of lines) {
-    const low = norm(line);
+  let choice: string | null = null;
+  for (let i = 0; i < lines.length; i++) {
+    const low = norm(lines[i] as string);
     if (!STATES_AMOUNT.test(low) || NOT_CURRENCY.test(low)) continue;
     const found = CURRENCIES.find(([, re]) => re.test(low));
-    if (found) return found[0] as string;
+    if (!found) continue;
+    const offered = lines.slice(Math.max(0, i - 2), i + 3).some(guaraniOffered);
+    if (!offered) return { currency: found[0] as string, choice: null };
+    choice ??= found[0] as string;
   }
-  return null;
+  return { currency: null, choice };
 }
 
 // ---------------------------------------------------------------------------
@@ -769,7 +812,7 @@ function readDate(lines: string[]): Date | null {
 // Parties
 
 /** A legal form closing a company name: S.A., S.R.L., E.A.S., S.A.E.C.A. */
-const LEGAL_FORM =
+export const LEGAL_FORM =
   /(?:^|[\s,])(?:s\.?\s?a\.?(?:\s?e\.?\s?c\.?\s?a\.?)?|s\.?\s?r\.?\s?l\.?|e\.?\s?a\.?\s?s\.?|s\.?\s?a\.?\s?c\.?\s?i\.?)(?=$|[\s,\-])/i;
 
 /**
@@ -797,6 +840,13 @@ function readReceptorNombre(lines: string[]): string | null {
             .replace(/^[\s.\-]*del(?=\s+\p{Lu}|\s*$)/u, '');
     rest = rest.replace(/^[\s:.\-]+/, '').trim();
     if (!rest) rest = (lines[i + 1] ?? '').trim();
+    // The rows rebuilt from a two-column header carry the next column's label
+    // on: "TEC BIO E.A.S. Fecha y Hora de Emisión: 17/08/2026 11:01",
+    // "TEC BIO E.A.S. Moneda: PYG", "Tec Bio Solution 80175384-8".
+    rest = rest
+      .replace(/\s+(?:(?:fecha|moneda|tel(?:[eé]fono)?|ruc|condici[oó]n|direcci[oó]n)\b|c\.\s*i\.).*$/iu, '')
+      .replace(/\s*\d{5,8}\s*-\s*\d\b.*$/, '')
+      .trim();
     if (rest.length >= 3 && /\p{L}{2}/u.test(rest)) return rest.slice(0, 60);
   }
   return null;
@@ -899,7 +949,7 @@ export function parseReceipt(text: string): ParsedReceipt {
     /fecha\s*de\s*emisi|fecha\s*\/\s*hora|cod\.?\s*descrip/i.test(l),
   );
   const header = lines.slice(0, headerEnd > 0 ? headerEnd : Math.min(8, lines.length));
-  const emisor = findRuc(header.join('\n'));
+  const emisor = findRuc(header.join('\n'), true);
 
   // The customer's RUC/CI is printed against a label near the foot.
   const recIndex = lines.findIndex(
@@ -944,14 +994,18 @@ export function parseReceipt(text: string): ParsedReceipt {
         ? 'debito'
         : null;
   const cdc = nota ? null : readCdc(printed, emisor?.ruc ?? null, numeroDoc, fechaEmision);
-  const foreignCurrency = readForeignCurrency(lines);
+  const { currency: foreignCurrency, choice: currencyChoice } = readForeignCurrency(lines);
 
   // "Exentas 300.000 0": a KuDE prints the amount and then its IVA column, so
   // the LAST number on that line is the tax, not the exempt amount — read as
   // the last, a Gs 300.000 exempt fuel invoice came to nothing and was
   // refused. The first amount after the label, or the next line when the
   // label stands alone.
-  const exentasIndex = lines.findIndex((l) => /exent/i.test(norm(l)));
+  // Not the item table's heading, "EXENTAS 5% 10%": it names the columns, and
+  // Vision drops the signs — "REG. UNITARIO EXENTAS 5 10" filed 5 as exempt.
+  const exentasIndex = lines.findIndex(
+    (l) => /exent/i.test(norm(l)) && !/exent\w*\s*(?:(?:5|10)\s*%?\s*)+$/.test(norm(l)),
+  );
   const exentas =
     exentasIndex >= 0
       ? (firstNumberAfter(norm(lines[exentasIndex] as string), /exent\w*/) ??
@@ -1015,6 +1069,7 @@ export function parseReceipt(text: string): ParsedReceipt {
     cdc,
     nota,
     foreignCurrency,
+    currencyChoice,
     tipoCambio: null,
     items: [],
     totalsAgree: agree,
@@ -1140,6 +1195,15 @@ export function parseBest(
   p.nota ??= readings.find((r) => r.parsed.nota)?.parsed.nota ?? null;
   p.foreignCurrency ??=
     readings.find((r) => r.parsed.foreignCurrency)?.parsed.foreignCurrency ?? null;
+  // The rows rebuilt from word boxes put "Guaraníes" and "Dólares" on the
+  // total's line; Vision's blocks leave them on lines of their own. It is the
+  // same page either way: where one layout saw the form offer the currency,
+  // another that read it as stated read the same printed words.
+  const offered = readings.find((r) => r.parsed.currencyChoice)?.parsed.currencyChoice ?? null;
+  if (offered && (p.foreignCurrency == null || p.foreignCurrency === offered)) {
+    p.foreignCurrency = null;
+    p.currencyChoice = offered;
+  }
   return best;
 }
 
@@ -1365,6 +1429,7 @@ export function fromExtraction(x: Extraction): ParsedReceipt {
     cdc,
     nota,
     foreignCurrency: foreign,
+    currencyChoice: null,
     tipoCambio,
     items,
     totalsAgree: agree,

@@ -1,5 +1,5 @@
 import { calcRucDv } from '../utils/ruc';
-import type { ParsedItem, ParsedReceipt } from './receipt-parser';
+import { LEGAL_FORM, type Extraction, type ParsedItem, type ParsedReceipt } from './receipt-parser';
 
 /**
  * Which reading of a photo is stored, if any.
@@ -31,10 +31,16 @@ export type PhotoDecision =
   | { kind: 'store'; reading: ParsedReceipt; source: PhotoSource }
   | { kind: 'refuse'; reason: Refusal; reading: ParsedReceipt | null; detail?: string };
 
-/** Why importPhoto would refuse this reading on its own, or null. */
+/**
+ * Why importPhoto would refuse this reading on its own, or null.
+ *
+ * A foreign currency with no rate on the paper is not a reason: the law names
+ * the rate then — the DNIT's close of the day before (see exchange-rates) —
+ * and importPhoto looks it up. A dollar rent receipt with every figure
+ * verified was refused for it four times (Residencial Domicia, 2026-09-21).
+ */
 export function refusalOf(p: ParsedReceipt): Refusal | null {
   if (p.nota) return 'nota';
-  if (p.foreignCurrency && p.tipoCambio == null) return 'moneda';
   if (p.total == null) return 'total';
   if (p.totalsAgree === false) return 'contradiccion';
   if (p.missing.includes('IVA')) return 'iva';
@@ -51,7 +57,6 @@ export function refusalOf(p: ParsedReceipt): Refusal | null {
  */
 export function amountsSound(p: ParsedReceipt): boolean {
   if (p.nota || p.total == null || p.totalsAgree === false) return false;
-  if (p.foreignCurrency && p.tipoCambio == null) return false;
   // With no tax figure there is nothing to compare: sameAmounts reads a null
   // IVA as zero and would refuse a total the two readers agree on.
   return !p.missing.includes('IVA');
@@ -111,6 +116,75 @@ export function printedAmounts(text: string): Set<number> {
       out.add(Math.round(Number(`${(decimal[1] as string).replace(/\D/g, '')}.${decimal[2]}`) * 100));
     }
   }
+  for (const cents of amountsInWords(text)) out.add(cents);
+  return out;
+}
+
+/** Spanish number words, as a talonario writes its total out. */
+const NUMBER_WORDS: Record<string, number> = {
+  un: 1, uno: 1, una: 1, dos: 2, tres: 3, cuatro: 4, cinco: 5, seis: 6, siete: 7, ocho: 8,
+  nueve: 9, diez: 10, once: 11, doce: 12, trece: 13, catorce: 14, quince: 15, dieciseis: 16,
+  diecisiete: 17, dieciocho: 18, diecinueve: 19, veinte: 20, veintiun: 21, veintiuno: 21,
+  veintiuna: 21, veintidos: 22, veintitres: 23, veinticuatro: 24, veinticinco: 25,
+  veintiseis: 26, veintisiete: 27, veintiocho: 28, veintinueve: 29, treinta: 30,
+  cuarenta: 40, cincuenta: 50, sesenta: 60, setenta: 70, ochenta: 80, noventa: 90, cien: 100,
+  ciento: 100, doscientos: 200, doscientas: 200, trescientos: 300, trescientas: 300,
+  cuatrocientos: 400, cuatrocientas: 400, quinientos: 500, quinientas: 500, seiscientos: 600,
+  seiscientas: 600, setecientos: 700, setecientas: 700, ochocientos: 800, ochocientas: 800,
+  novecientos: 900, novecientas: 900,
+};
+
+/**
+ * The amounts the page writes out in words, in cents: "Novecientos mil" is
+ * 900.000, "quinientos con 00/100" is 500,00.
+ *
+ * On a talonario the figures are handwritten and the words beside them are
+ * often the legible half: the "500'00" of a dollar rent receipt came back from
+ * Vision as "500100", and its "quinientos con 00/100" was the one place the
+ * page still said 500 (2026-09-21). Only runs worth 100 or more count — "un"
+ * and "dos" are words of every sentence.
+ */
+export function amountsInWords(text: string): number[] {
+  const tokens = text
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .match(/[a-z]+|\d{1,2}\s*\/\s*100/g) ?? [];
+  const out: number[] = [];
+  let total = 0;
+  let current = 0;
+  let words = 0;
+  const close = (cents: number) => {
+    const value = total + current;
+    if (words && value >= 100) out.push(value * 100 + cents);
+    total = 0;
+    current = 0;
+    words = 0;
+  };
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i] as string;
+    const n = NUMBER_WORDS[t];
+    if (n != null) {
+      current += n;
+      words++;
+    } else if (t === 'mil') {
+      total += (current || 1) * 1000;
+      current = 0;
+      words++;
+    } else if (/^millon(?:es)?$/.test(t)) {
+      total = (total + current || 1) * 1_000_000;
+      current = 0;
+      words++;
+    } else if (t === 'y' && words) {
+      continue;
+    } else if (t === 'con' && words && /^\d/.test(tokens[i + 1] ?? '')) {
+      close(Number((tokens[i + 1] as string).split('/')[0]));
+      i++;
+    } else {
+      close(0);
+    }
+  }
+  close(0);
   return out;
 }
 
@@ -168,52 +242,72 @@ function misread(printed: Set<string>, word: string): boolean {
   return false;
 }
 
-const MONTHS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'se', 'oct', 'nov', 'dic'];
-
 /** Written out, as a talonario's blank is filled in by hand. */
 const MONTH_WORDS = [
   'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
   'julio', 'agosto', 'setiembre', 'octubre', 'noviembre', 'diciembre',
 ];
 
-/** Whether two words differ by at most one letter (insert, drop or swap). */
-function withinOneEdit(a: string, b: string): boolean {
-  if (a === b) return true;
-  if (Math.abs(a.length - b.length) > 1) return false;
-  const [short, long] = a.length <= b.length ? [a, b] : [b, a];
-  let i = 0;
-  let j = 0;
-  let edits = 0;
-  while (i < short.length && j < long.length) {
-    if (short[i] === long[j]) {
-      i += 1;
-      j += 1;
-      continue;
+/** Every way a month is written out, with its number. */
+const MONTH_NAMES: [string, number][] = [
+  ...MONTH_WORDS.map((w, i): [string, number] => [w, i + 1]),
+  ['septiembre', 9],
+];
+
+/** Letters to insert, drop or swap to turn one word into the other. */
+function editDistance(a: string, b: string): number {
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const row = [i];
+    for (let j = 1; j <= b.length; j++) {
+      row[j] = Math.min(
+        (prev[j] as number) + 1,
+        (row[j - 1] as number) + 1,
+        (prev[j - 1] as number) + (a[i - 1] === b[j - 1] ? 0 : 1),
+      );
     }
-    if (++edits > 1) return false;
-    if (short.length === long.length) i += 1;
-    j += 1;
+    prev = row;
   }
-  return edits + (long.length - j) + (short.length - i) <= 1;
+  return prev[b.length] as number;
 }
 
 /**
- * Whether the window names this month — written out, and read off handwriting.
+ * The month a word is, read through Vision's misreadings of handwriting — or
+ * null.
  *
- * Vision misses a letter of a word filled in by hand ("agosto" came back with
- * one letter wrong on the client's talonario), so one edit is allowed. Never
- * into another month, though: "junio" and "julio" are one letter apart, and
- * the month is the period the IVA is declared in.
+ * An abbreviation ("ago", "sept", "dic") is the month it begins. A word is the
+ * one month it is closest to, within reach: a letter off for a word of five
+ * letters or fewer, two for a longer one. "agosto" filled in by hand came back
+ * as "agasto" (2026-09-20) and as "ageste" (2026-09-21). A word as close to
+ * two months is neither: "junio" and "julio" are one letter apart, and the
+ * month is the period the IVA is declared in.
  */
-function monthNamed(window: string, month: number): boolean {
-  const word = MONTH_WORDS[month - 1] as string;
-  const prefix = MONTHS[month - 1] as string;
-  for (const token of window.match(/[a-z]{3,}/g) ?? []) {
-    if (token.startsWith(prefix)) return true;
-    const otherMonth = MONTH_WORDS.some((w, i) => i !== month - 1 && w === token);
-    if (!otherMonth && token.length >= 4 && withinOneEdit(token, word)) return true;
+export function monthOfWord(word: string): number | null {
+  const token = word.toLowerCase();
+  if (token.length < 3) return null;
+  if (token.length <= 4) {
+    const begun = new Set(MONTH_NAMES.filter(([name]) => name.startsWith(token)).map(([, n]) => n));
+    if (begun.size === 1) return [...begun][0] as number;
   }
-  return false;
+  if (token.length < 4) return null;
+  let best = Infinity;
+  let months = new Set<number>();
+  for (const [name, n] of MONTH_NAMES) {
+    const d = editDistance(token, name);
+    if (d < best) {
+      best = d;
+      months = new Set([n]);
+    } else if (d === best) {
+      months.add(n);
+    }
+  }
+  const reach = token.length <= 5 ? 1 : 2;
+  return best <= reach && months.size === 1 ? ([...months][0] as number) : null;
+}
+
+/** Whether the window names this month — written out, and read off handwriting. */
+function monthNamed(window: string, month: number): boolean {
+  return (window.match(/[a-z]{3,}/g) ?? []).some((token) => monthOfWord(token) === month);
 }
 
 /**
@@ -250,13 +344,22 @@ export function dateSeen(text: string, date: Date): boolean {
   const patterns = [
     `(?<!\\d)0?${d}${sep}0?${m}${sep}${year}(?!\\d)`,
     `(?<!\\d)${y}${sep}0?${m}${sep}0?${d}(?!\\d)`,
-    `(?<!\\d)0?${d}\\s*(?:de\\s*)?${MONTHS[m - 1]}[a-z]*\\.?\\s*(?:del?\\s*)?${year}(?!\\d)`,
   ].map((p) => new RegExp(p));
+  // Written out, the month read as handwriting is (see monthOfWord), and the
+  // year as a talonario fills it in: its own "20" printed, "26" by hand.
+  const inWords = new RegExp(
+    `(?<!\\d)0?${d}\\s*(?:de\\s*\\.?\\s*)?([a-z]+)\\.?\\s*(?:del?\\s*)?` +
+      `(?:${y}|${String(y).slice(0, 2)}\\s*[.\\s]\\s*${String(y).slice(2)}|${String(y).slice(2)})(?!\\d)`,
+    'g',
+  );
+  const shows = (line: string) =>
+    patterns.some((p) => p.test(line)) ||
+    [...line.matchAll(inWords)].some((x) => monthOfWord(x[1] as string) === m);
 
   const lines = text.toLowerCase().split(/\r?\n/);
   const at: number[] = [];
   lines.forEach((line, i) => {
-    if (patterns.some((p) => p.test(line))) at.push(i);
+    if (shows(line)) at.push(i);
   });
   const near = (i: number) => [lines[i - 1] ?? '', lines[i] ?? '', lines[i + 1] ?? ''].join(' | ');
   // Lines that call this date something else are out from the start, and so is
@@ -352,7 +455,11 @@ export function datePartlySeen(text: string, date: Date): boolean {
   return lines.some((line, i) => {
     if (!EMISSION.test(line) || RIVAL.test(line) || FOOT.test(line)) return false;
     const seen = handwrittenNear(lines, i, d, m, y);
-    return seen.dayYear && !seen.full;
+    if (!seen.dayYear || seen.full) return false;
+    // Lost, not contradicted: a page that reads "Agosto" beside the label
+    // does not half confirm a July the model wrote.
+    const window = lines.slice(i, i + 3).join(' ');
+    return !(window.match(/[a-z]{3,}/g) ?? []).some((token) => monthOfWord(token) != null);
   });
 }
 
@@ -392,6 +499,7 @@ export function witnessed(
   text: string,
   ownRuc: string | null = null,
   ocr: ParsedReceipt | null = null,
+  rows: string[] = [],
 ): { reading: ParsedReceipt; seen: boolean } {
   const cents = printedAmounts(text);
   const shown = (v: number | null) => v == null || v === 0 || cents.has(Math.round(v * 100));
@@ -460,11 +568,17 @@ export function witnessed(
       r.emisorDv = null;
     }
     if (r.numeroDoc && !digitsSeen(text, lastGroup(r.numeroDoc))) r.numeroDoc = null;
-    if (r.fechaEmision && !dateSeen(text, r.fechaEmision)) {
+    // The date is read line by line, and a talonario's filled-in blanks come
+    // apart in Vision's blocks: "Santa Rita, 31 de" on one line, the month on
+    // the next, "de 2026" seven lines down. The printed rows rebuilt from the
+    // same words keep them on one line (Residencial Domicia, 2026-09-21).
+    const texts = [text, ...rows.filter((t) => t && t !== text)];
+    const fecha = r.fechaEmision;
+    if (fecha && !texts.some((t) => dateSeen(t, fecha))) {
       // Day and year beside the emission label, month lost to handwriting:
       // keep it and say so, rather than refuse an invoice whose amounts the
       // page confirmed (Cevelio, 2026-09-20).
-      if (datePartlySeen(text, r.fechaEmision)) unconfirmedDate = true;
+      if (texts.some((t) => datePartlySeen(t, fecha))) unconfirmedDate = true;
       else r.fechaEmision = null;
     }
   }
@@ -496,16 +610,39 @@ const words = (s: string) =>
     .replace(/[^a-z0-9ñ&]+/g, ' ')
     .trim();
 
+/** A line that names the buyer, not the seller. */
+const BUYER_LINE = /client|se[ñn]or|raz[oó]n\s*social|nombre/i;
+
+/** Where the seller is, which the model has given for who it is. */
+const ADDRESS = /\b(?:ruta|calle|avda|avenida|km|casi|esquina|barrio|paraguay)\b/i;
+
 /**
- * The issuer's name, from two readings that agree on who issued it: the
- * parser's, unless the model's is the same name without what the parser
- * picked up after it on the row. The model has put an address in the name.
+ * The issuer's name, from two readings that agree on who issued it.
+ *
+ * The model's when it is the parser's without what the parser picked up
+ * after it on the row. The parser's when the model gave an address for the
+ * name, and when the parser's is the registered name — it carries its legal
+ * form, S.A., S.R.L., E.A.S. — and not the buyer's. Otherwise the model's,
+ * read off the letterhead: the parser took a talonario's printed economic
+ * activities for the name ("ACTIVIDADES DE SERVICIOS PERSONALES N.C.P",
+ * "CONSTRUCCIÓN DE EDIFICIOS"), and a label ("Serie: AA") (2026-09-21).
+ *
+ * The model's name reaches here only when a word of it is printed (see
+ * witnessed).
  */
-function issuerName(ocrName: string | null, aiName: string | null): string | null {
+function issuerName(
+  ocrName: string | null,
+  aiName: string | null,
+  buyerName: string | null,
+): string | null {
   if (!ocrName || !aiName) return ocrName ?? aiName;
   const short = words(aiName);
   const whole = short.includes(' ') || short.length >= 6;
-  return whole && words(ocrName).startsWith(short) ? aiName : ocrName;
+  if (whole && words(ocrName).startsWith(short)) return aiName;
+  if (ADDRESS.test(aiName)) return ocrName;
+  const buyer = buyerName ? words(buyerName) : '';
+  const isBuyer = BUYER_LINE.test(ocrName) || (buyer.length >= 4 && words(ocrName).includes(buyer));
+  return LEGAL_FORM.test(ocrName) && !isBuyer ? ocrName : aiName;
 }
 
 /**
@@ -536,13 +673,24 @@ function identified(
     return other.emisorRuc == null ? (other.emisorNombre ?? null) : null;
   };
   const emisorNombre = sameIssuer
-    ? issuerName(ocr?.emisorNombre ?? null, ai?.emisorNombre ?? null)
+    ? issuerName(
+        ocr?.emisorNombre ?? null,
+        ai?.emisorNombre ?? null,
+        ai?.receptorNombre ?? ocr?.receptorNombre ?? null,
+      )
     : (from.emisorNombre ?? otherName());
 
   const buyer = [first.receptorRuc, second?.receptorRuc].find((r) => r && r !== emisorRuc) ?? null;
+  // The rate the model read and the printed guaraní total confirmed (see
+  // fromExtraction), under amounts in the same currency: the parser never
+  // reads one, and storing its figures dropped it.
+  const tipoCambio =
+    amounts.tipoCambio ??
+    (ai && ai.foreignCurrency === amounts.foreignCurrency ? ai.tipoCambio : null);
 
   return recounted({
     ...amounts,
+    tipoCambio,
     emisorRuc,
     emisorDv: from.emisorDv,
     emisorNombre,
@@ -554,6 +702,90 @@ function identified(
     cdc: first.cdc ?? second?.cdc ?? null,
     items: ai ? itemsFitting(amounts, ai.items) : [],
   });
+}
+
+/** An exchange rate printed on the page: "Cotizacion: 6.027,92Gs.". */
+const RATE_PRINTED = /(?:cotizaci[oó]n|tipo\s*de\s*cambio)[^\d\n]{0,12}\d[\d.,]{2,}/i;
+
+/**
+ * A reading to store — unless it is in another currency and the page prints
+ * its own rate, which no reader confirmed. The law takes the rate the invoice
+ * carries before any other, and its XML has it; the DNIT's close is for the
+ * invoice that prints none (see exchange-rates).
+ */
+function stored(reading: ParsedReceipt, source: PhotoSource, text: string): PhotoDecision {
+  if (reading.foreignCurrency && reading.tipoCambio == null && RATE_PRINTED.test(text)) {
+    return { kind: 'refuse', reason: 'moneda', reading, detail: 'rate' };
+  }
+  return { kind: 'store', reading, source };
+}
+
+/** A total written out with its cents: "quinientos con 00/100". */
+const CENTS_IN_WORDS = /\bcon\s*\d{1,2}\s*\/\s*100\b|centavo/;
+
+/** Whether any of these amounts has cents — which a guaraní never does. */
+const hasCents = (values: (number | null)[]): boolean =>
+  values.some((v) => v != null && Math.abs(v - Math.round(v)) > 1e-9);
+
+/**
+ * The model's extraction in the currency the page is in.
+ *
+ * A talonario that prints the choice — "Son: ☐ Guaraníes ☐ Dólares
+ * Americanos" — leaves the text unable to say which box is ticked. The model
+ * sees the tick, but not reliably: one dollar rent receipt came back in
+ * dollars in production and in guaraníes on the same photo here, with an IVA
+ * of 45,45 (Residencial Domicia, 2026-09-21). Guaraníes have no cents, so a
+ * reading in guaraníes that carries them — in its figures, or in the total
+ * written out — on a page that offers or names another currency, is in that
+ * currency.
+ */
+export function settledCurrency(x: Extraction, ocr: ParsedReceipt | null, text: string): Extraction {
+  const other = ocr?.foreignCurrency ?? ocr?.currencyChoice ?? null;
+  if (x.moneda !== 'PYG' || !other) return x;
+  const cents =
+    hasCents([x.total, x.gravada5, x.gravada10, x.exentas, x.iva5, x.iva10, x.totalIva]) ||
+    CENTS_IN_WORDS.test(text.toLowerCase());
+  if (!cents) return x;
+  const moneda = (['USD', 'BRL', 'EUR'] as const).find((c) => c === other) ?? 'OTRA';
+  return { ...x, moneda };
+}
+
+/**
+ * Whether the page shows a reading's figures are not guaraníes: cents, in the
+ * figures or in the total written out, or an exchange rate the printed
+ * guaraní total confirms (see fromExtraction).
+ *
+ * Where the form only offers the currency, the model's word is all that says
+ * "dollars", and a Gs 900.000 invoice read as USD 900.000 would go into the
+ * IVA some six thousand times over.
+ */
+function foreignShown(r: ParsedReceipt, text: string): boolean {
+  return (
+    r.tipoCambio != null ||
+    hasCents([r.total, r.gravada5, r.gravada10, r.exentas, r.iva5, r.iva10]) ||
+    CENTS_IN_WORDS.test(text.toLowerCase())
+  );
+}
+
+/**
+ * The parser's reading in the currency the model saw ticked, where the form
+ * only offers it — or 'open' when nothing settles it.
+ *
+ * A foreign currency needs the page to show something a guaraní amount cannot
+ * have, and the model's own figures to hold in it: the parser's are read the
+ * guaraní way, and must never go on record as dollars on the model's word
+ * alone. With no model there is nothing to say which box is ticked.
+ */
+function choiceSettled(
+  ocr: ParsedReceipt | null,
+  model: ParsedReceipt | null,
+  text: string,
+): ParsedReceipt | null | 'open' {
+  if (!ocr || ocr.foreignCurrency != null || !ocr.currencyChoice) return ocr;
+  if (!model) return 'open';
+  const chosen = model.foreignCurrency;
+  if (chosen != null && (!foreignShown(model, text) || !amountsSound(model))) return 'open';
+  return { ...ocr, foreignCurrency: chosen, currencyChoice: null };
 }
 
 /** What one reader saw that the other's amounts cannot overrule. */
@@ -574,18 +806,26 @@ function vetoed(ocr: ParsedReceipt | null, ai: ParsedReceipt | null): PhotoDecis
 }
 
 /**
- * @param ocr    the parser's best reading of the OCR text, if Vision read it
- * @param aiRead the model's reading (fromExtraction), if it answered
- * @param text   the OCR text of the same photo — the witness to the model
- * @param ownRuc the user's RUC, without its check digit: the buyer's
+ * @param ocrRead the parser's best reading of the OCR text, if Vision read it
+ * @param aiRead  the model's reading (fromExtraction), if it answered
+ * @param text    the OCR text of the same photo — the witness to the model
+ * @param ownRuc  the user's RUC, without its check digit: the buyer's
+ * @param rows    the same words rebuilt into printed rows (see ocr's layouts)
  */
 export function decidePhoto(
-  ocr: ParsedReceipt | null,
+  ocrRead: ParsedReceipt | null,
   aiRead: ParsedReceipt | null,
   text: string,
   ownRuc: string | null = null,
+  rows: string[] = [],
 ): PhotoDecision {
-  const ai = aiRead ? witnessed(aiRead, text, ownRuc, ocr) : null;
+  const ai = aiRead ? witnessed(aiRead, text, ownRuc, ocrRead, rows) : null;
+  const settled = choiceSettled(ocrRead, ai?.reading ?? null, text);
+  if (settled === 'open') {
+    return { kind: 'refuse', reason: 'moneda', reading: ai?.reading ?? ocrRead, detail: 'choice' };
+  }
+  const ocr = settled;
+
   const veto = vetoed(ocr, ai?.reading ?? null);
   if (veto) return veto;
 
@@ -599,13 +839,13 @@ export function decidePhoto(
     return { kind: 'refuse', reason: 'lecturas', reading: ocr, detail: 'amounts' };
   }
   if (ocrSound && aiSound) {
-    return { kind: 'store', reading: identified(ocr, ocr, ai.reading), source: 'ocr+ai' };
+    return stored(identified(ocr, ocr, ai.reading), 'ocr+ai', text);
   }
   if (ocrSound) {
-    return { kind: 'store', reading: identified(ocr, ocr, ai?.reading ?? null), source: 'ocr' };
+    return stored(identified(ocr, ocr, ai?.reading ?? null), 'ocr', text);
   }
   if (aiSound && ai.seen) {
-    return { kind: 'store', reading: identified(ai.reading, ocr, ai.reading), source: 'ai' };
+    return stored(identified(ai.reading, ocr, ai.reading), 'ai', text);
   }
 
   const basis = ocr ?? ai?.reading ?? null;

@@ -1,0 +1,32 @@
+{
+  "emisorNombre": "Cevelio Servicio Generales y Metalurgica",
+  "emisorRuc": "6902656",
+  "emisorDv": 4,
+  "receptorNombre": "Tec Bio Solution",
+  "receptorRuc": "80175384",
+  "timbrado": "18908353",
+  "numeroDoc": "001-001-0000071",
+  "fecha": "2026-08-19",
+  "tipoDocumento": "factura",
+  "moneda": "PYG",
+  "tipoCambio": null,
+  "totalEnGuaranies": null,
+  "total": 900000,
+  "gravada5": null,
+  "gravada10": 900000,
+  "exentas": null,
+  "iva5": null,
+  "iva10": 81818,
+  "totalIva": 81818,
+  "redondeo": null,
+  "cdc": null,
+  "items": [
+    {
+      "descripcion": "Fabricacion de puerta",
+      "cantidad": null,
+      "precioUnitario": 900000,
+      "total": 900000,
+      "tasaIva": 10
+    }
+  ]
+}

@@ -93,7 +93,11 @@ const INSTRUCTIONS =
   'the other null rather than repeating it. exentas ' +
   'is the exempt amount. total is the amount to pay in the invoice currency. redondeo is a printed ' +
   'Ley 347 rounding. moneda: PYG unless the invoice states another currency (e.g. "dolares ' +
-  'americanos", "Moneda: USD"). tipoCambio: the printed exchange rate ("Cotizacion", "Tipo de ' +
+  'americanos", "Moneda: USD"). Many talonarios print the choice beside the total, "Son: [ ] ' +
+  'Guaranies [ ] Dolares Americanos": both words are always printed, and the currency is the one ' +
+  'whose box is marked (an X or a tick) — look at the boxes, not the words. Guaranies have no ' +
+  'cents: an IVA of "45,45", or a total written out "con 00/100", is not in guaranies. ' +
+  'tipoCambio: the printed exchange rate ("Cotizacion", "Tipo de ' +
   'cambio") in guaranies per unit, else null. totalEnGuaranies: a printed total in guaranies when ' +
   'the invoice is in another currency, else null. emisor is the seller that issued the invoice ' +
   '(its RUC is printed next to the timbrado); receptor is the buyer. RUC: the digits before the ' +

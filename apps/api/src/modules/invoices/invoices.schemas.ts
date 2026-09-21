@@ -18,6 +18,11 @@ export const setTipoSchema = z.object({
   tipo: z.enum(['venta', 'compra']).nullable(),
 });
 
+export const setTipoCambioSchema = z.object({
+  /** Guaraníes per unit, typed by hand; null to go back to the DNIT's close. */
+  tipoCambio: z.number().positive().max(1_000_000).nullable(),
+});
+
 export const listInvoicesQuerySchema = z.object({
   /** One side of the ledger, or both when absent. */
   tipo: z.enum(['venta', 'compra']).optional(),

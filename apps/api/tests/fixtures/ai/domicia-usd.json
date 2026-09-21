@@ -1,0 +1,32 @@
+{
+  "emisorNombre": "RESIDENCIAL DOMICIA",
+  "emisorRuc": "7534875",
+  "emisorDv": 6,
+  "receptorNombre": "TEC BIO EAS",
+  "receptorRuc": "80175384",
+  "timbrado": "18838978",
+  "numeroDoc": "001-001-0001314",
+  "fecha": "2026-08-31",
+  "tipoDocumento": "factura",
+  "moneda": "PYG",
+  "tipoCambio": null,
+  "totalEnGuaranies": null,
+  "total": 500,
+  "gravada5": null,
+  "gravada10": 500,
+  "exentas": null,
+  "iva5": null,
+  "iva10": 45.45,
+  "totalIva": 45.45,
+  "redondeo": null,
+  "cdc": null,
+  "items": [
+    {
+      "descripcion": "alquiler comercial",
+      "cantidad": null,
+      "precioUnitario": 500,
+      "total": 500,
+      "tasaIva": 10
+    }
+  ]
+}

@@ -10,8 +10,9 @@ import {
   categoryLabel,
   type CategoryKey,
 } from '../../services/categories';
+import { officialRate, type OfficialRate } from '../../services/exchange-rates';
 import { extractText, MAX_IMAGE_BYTES } from '../../services/ocr';
-import { decidePhoto, type PhotoDecision } from '../../services/photo-decision';
+import { decidePhoto, settledCurrency, type PhotoDecision } from '../../services/photo-decision';
 import {
   docDigits,
   fromExtraction,
@@ -53,6 +54,13 @@ export interface PublicInvoice {
   moneda: string;
   /** Guaraníes per unit of `moneda`, for anything not issued in guaraníes. */
   tipoCambio: number | null;
+  /**
+   * Where the rate came from when the invoice did not print one: "dnit", the
+   * close the law names, or "manual". Null: the invoice's own.
+   */
+  tipoCambioFuente: 'dnit' | 'manual' | null;
+  /** For a DNIT rate, the day whose close it is (YYYY-MM-DD). */
+  tipoCambioFecha: string | null;
   totalOpe: number;
   totalIva: number;
   iva5: number;
@@ -139,6 +147,8 @@ export function toPublicInvoice(
     // 3.420 but not what that is in guaraníes, which is the figure the month
     // is closed with.
     tipoCambio: inv.tipoCambio == null ? null : n(inv.tipoCambio),
+    tipoCambioFuente: inv.tipoCambioFuente === 'dnit' || inv.tipoCambioFuente === 'manual' ? inv.tipoCambioFuente : null,
+    tipoCambioFecha: inv.tipoCambioFuente === 'dnit' ? closeDayOf(inv.fechaEmision) : null,
     totalOpe: n(inv.totalOpe),
     totalIva: n(inv.totalIva),
     iva5: n(inv.iva5),
@@ -388,13 +398,60 @@ export async function listInvoices(userId: string, q: ListInvoicesQuery) {
   };
 }
 
+/** The user's RUC, which says whether an invoice is a sale or a purchase. */
+async function ownRucOf(userId: string): Promise<string | null> {
+  const owner = await prisma.user.findUnique({ where: { id: userId }, select: { ruc: true } });
+  return owner?.ruc?.replace(/\D/g, '') || null;
+}
+
 export async function getInvoice(userId: string, id: string): Promise<PublicInvoice> {
   const inv = (await prisma.invoice.findFirst({
     where: { id, userId },
     include: { items: true },
   })) as InvoiceWithItems | null;
   if (!inv) throw AppError.notFound('Factura no encontrada');
-  return toPublicInvoice(inv);
+  // Without the RUC every invoice read as a purchase here, and the detail
+  // screen called the client's own sales "Compra".
+  return toPublicInvoice(inv, await ownRucOf(userId));
+}
+
+/** The day whose close converts an invoice issued on [issued]: the day before. */
+function closeDayOf(issued: Date): string {
+  return new Date(Date.UTC(issued.getUTCFullYear(), issued.getUTCMonth(), issued.getUTCDate() - 1))
+    .toISOString()
+    .slice(0, 10);
+}
+
+const CURRENCY_NAMES: Record<string, string> = { USD: 'dólares', BRL: 'reales', EUR: 'euros' };
+
+/**
+ * The DNIT's close for an invoice that prints no rate of its own: the selling
+ * rate for a purchase — the buyer pays for the currency — and the buying rate
+ * for a sale. Refuses, saying why, when there is none to use.
+ */
+async function dnitRate(moneda: string, issued: Date, tipo: 'venta' | 'compra'): Promise<OfficialRate> {
+  const found = await officialRate(moneda, issued, tipo === 'venta' ? 'compra' : 'venta');
+  if (typeof found !== 'string') return found;
+  const name = CURRENCY_NAMES[moneda] ?? 'moneda extranjera';
+  const [y, m, d] = closeDayOf(issued).split('-');
+  logger.warn({ moneda, reason: found }, 'no DNIT rate for a foreign invoice');
+  switch (found) {
+    case 'moneda':
+      throw AppError.badRequest(
+        `Esta factura está en ${name} y no trae su tipo de cambio, y la DNIT no publica una ` +
+          'cotización para esa moneda. Cargala con su XML.',
+      );
+    case 'pendiente':
+      throw AppError.badRequest(
+        `Esta factura está en ${name} y no trae su tipo de cambio. Se convierte con la cotización ` +
+          `de la DNIT del día anterior (${d}/${m}/${y}), que todavía no está publicada. Probá de nuevo mañana.`,
+      );
+    default:
+      throw AppError.badRequest(
+        `Esta factura está en ${name} y no trae su tipo de cambio. Se convierte con la cotización ` +
+          'oficial que publica la DNIT, pero ahora no pudimos consultarla. Probá de nuevo en unos minutos.',
+      );
+  }
 }
 
 /**
@@ -419,24 +476,67 @@ export async function setCategoria(
     data: { categoria },
     include: { items: true },
   });
-  return toPublicInvoice(updated);
+  return toPublicInvoice(updated, await ownRucOf(userId));
 }
 
-/** Files an invoice as a sale or a purchase, or back under the RUC (null). */
+/**
+ * Files an invoice as a sale or a purchase, or back under the RUC (null).
+ *
+ * A DNIT rate follows the side: a purchase is converted at the selling rate
+ * and a sale at the buying one.
+ */
 export async function setTipo(
   userId: string,
   id: string,
   tipo: 'venta' | 'compra' | null,
 ): Promise<PublicInvoice> {
-  const invoice = await prisma.invoice.findFirst({ where: { id, userId }, select: { id: true } });
+  const invoice = await prisma.invoice.findFirst({ where: { id, userId } });
   if (!invoice) throw AppError.notFound('Factura no encontrada');
-  const owner = await prisma.user.findUnique({ where: { id: userId }, select: { ruc: true } });
+  const ownRuc = await ownRucOf(userId);
+  const esVenta = tipo == null ? null : tipo === 'venta';
+  let rate: { tipoCambio: number } | Record<string, never> = {};
+  if (invoice.tipoCambioFuente === 'dnit') {
+    const side = ledgerSideOf({ emisorRuc: invoice.emisorRuc, esVenta }, ownRuc).tipo;
+    rate = { tipoCambio: (await dnitRate(invoice.moneda, invoice.fechaEmision, side)).rate };
+  }
   const updated = await prisma.invoice.update({
     where: { id },
-    data: { esVenta: tipo == null ? null : tipo === 'venta' },
+    data: { esVenta, ...rate },
     include: { items: true },
   });
-  return toPublicInvoice(updated, owner?.ruc ?? null);
+  return toPublicInvoice(updated, ownRuc);
+}
+
+/**
+ * Sets the exchange rate of an invoice that did not print one: by hand, or
+ * back to the DNIT's close (null). A rate the invoice itself carries is the
+ * one the law takes, and stays.
+ */
+export async function setTipoCambio(
+  userId: string,
+  id: string,
+  tipoCambio: number | null,
+): Promise<PublicInvoice> {
+  const invoice = await prisma.invoice.findFirst({ where: { id, userId } });
+  if (!invoice) throw AppError.notFound('Factura no encontrada');
+  if (invoice.moneda === 'PYG') throw AppError.badRequest('Esta factura está en guaraníes.');
+  if (invoice.tipoCambio != null && invoice.tipoCambioFuente == null) {
+    throw AppError.badRequest(
+      'Esta factura trae su propio tipo de cambio, y es el que vale para el IVA.',
+    );
+  }
+  const ownRuc = await ownRucOf(userId);
+  const data =
+    tipoCambio != null
+      ? { tipoCambio, tipoCambioFuente: 'manual' }
+      : {
+          tipoCambio: (
+            await dnitRate(invoice.moneda, invoice.fechaEmision, ledgerSideOf(invoice, ownRuc).tipo)
+          ).rate,
+          tipoCambioFuente: 'dnit',
+        };
+  const updated = await prisma.invoice.update({ where: { id }, data, include: { items: true } });
+  return toPublicInvoice(updated, ownRuc);
 }
 
 export async function deleteInvoice(userId: string, id: string): Promise<void> {
@@ -479,40 +579,25 @@ export async function importPhoto(userId: string, imageBase64: string) {
   // model reads the image as a whole. decidePhoto weighs the two, with the
   // OCR text as the witness to what the model says is printed. The model
   // never runs alone: without Vision's text there is nothing to hold it to.
-  const [ocr, ai, owner] = await Promise.all([
+  const [ocr, ai, ownRuc] = await Promise.all([
     extractText(imageBase64),
     readInvoiceWithAI(imageBase64),
-    prisma.user.findUnique({ where: { id: userId }, select: { ruc: true } }),
+    ownRucOf(userId),
   ]);
   const { parsed: ocrParsed, text, layout } = (parseBest(ocr.layouts) ??
     parseBest([{ layout: 'blocks', text: ocr.text }])) as Reading;
   const decision = decidePhoto(
     ocrParsed,
-    ai ? fromExtraction(ai) : null,
+    ai ? fromExtraction(settledCurrency(ai, ocrParsed, ocr.text)) : null,
     ocr.text,
-    owner?.ruc?.replace(/\D/g, '') || null,
+    ownRuc,
+    ocr.layouts.map((l) => l.text ?? '').filter(Boolean),
   );
   if (decision.kind === 'refuse') refusePhoto(decision, text, layout);
   const parsed = decision.reading;
   // decidePhoto stores only a reading with its total and date (see refusalOf).
   const { total, fechaEmision } = parsed;
   if (total == null || fechaEmision == null) throw new Error('import-photo: a stored reading lacks total or date');
-
-  if (parsed.missing.length) {
-    // An import that goes through with fields missing was silent on the
-    // server. On 2026-09-14 a fuel ticket came back with its total but no IVA
-    // and no RUC, and nothing here said which layout defeated the parser.
-    // Same rule as above: the layout only, never the text or the user.
-    logger.warn(
-      {
-        lines: text.split(/\r?\n/).length,
-        reading: layout,
-        missing: parsed.missing,
-        layout: layoutSkeleton(text),
-      },
-      'import-photo: imported with fields missing',
-    );
-  }
 
   // A KuDE keys by its printed CDC — what the XML of the same invoice carries;
   // anything else by issuer, number, date and total.
@@ -521,6 +606,37 @@ export async function importPhoto(userId: string, imageBase64: string) {
   if (existing) {
     throw AppError.conflict(
       'Esta factura ya fue importada. Si quedó mal, borrala y sacá la foto de nuevo.',
+    );
+  }
+
+  // Another currency with no rate on the paper: the one the law names, the
+  // DNIT's close of the day before. Said out loud — it was not read off the
+  // invoice.
+  const missing = [...parsed.missing];
+  let tipoCambio = parsed.tipoCambio;
+  let tipoCambioFuente: string | null = null;
+  if (parsed.foreignCurrency && tipoCambio == null) {
+    const side = ledgerSideOf({ emisorRuc: parsed.emisorRuc ?? '' }, ownRuc).tipo;
+    const official = await dnitRate(parsed.foreignCurrency, fechaEmision, side);
+    tipoCambio = official.rate;
+    tipoCambioFuente = 'dnit';
+    const [y, m, d] = official.date.split('-');
+    missing.push(`Tipo de cambio (cotización DNIT del ${d}/${m}/${y})`);
+  }
+
+  if (missing.length) {
+    // An import that goes through with fields missing was silent on the
+    // server. On 2026-09-14 a fuel ticket came back with its total but no IVA
+    // and no RUC, and nothing here said which layout defeated the parser.
+    // Same rule as above: the layout only, never the text or the user.
+    logger.warn(
+      {
+        lines: text.split(/\r?\n/).length,
+        reading: layout,
+        missing,
+        layout: layoutSkeleton(text),
+      },
+      'import-photo: imported with fields missing',
     );
   }
 
@@ -561,7 +677,8 @@ export async function importPhoto(userId: string, imageBase64: string) {
       receptorNombre: parsed.receptorNombre,
       fechaEmision,
       moneda: parsed.foreignCurrency ?? 'PYG',
-      tipoCambio: parsed.tipoCambio,
+      tipoCambio,
+      tipoCambioFuente,
       timbrado: parsed.timbrado,
       numeroDoc: parsed.numeroDoc,
       totalOpe: total,
@@ -608,7 +725,7 @@ export async function importPhoto(userId: string, imageBase64: string) {
   // The raw Prisma row serialises Decimal columns as strings, which the app's
   // parser rejects — after the invoice was already stored. Same shape as
   // import-xml, so the client has one Invoice to understand.
-  return { invoice: toPublicInvoice(invoice), missing: parsed.missing, confidence: parsed.confidence };
+  return { invoice: toPublicInvoice(invoice, ownRuc), missing, confidence: parsed.confidence };
 }
 
 /**
@@ -644,15 +761,27 @@ function refusePhoto(
 
     case 'moneda':
       // A dollar invoice adds up in dollars, so every check on the amounts
-      // passed it, and it was stored as guaraníes (2026-09-19). It is stored
-      // in its currency only when the model read the exchange rate, the
-      // printed guaraní total confirmed it and Vision saw both; otherwise its
-      // XML carries them.
+      // passed it, and it was stored as guaraníes (2026-09-19). So the two
+      // readers have to agree on the currency — and a form that only offers
+      // one ("Son: ☐ Guaraníes ☐ Dólares") is settled by the tick, which the
+      // text does not carry. This used to say "no pudimos leer su tipo de
+      // cambio" about a guaraní invoice (Cevelio, 2026-09-21).
+      // And a rate the invoice prints is the one the law takes: when no reader
+      // confirmed it, its XML carries it.
       logger.warn(context, 'import-photo: foreign currency');
+      if (decision.detail === 'rate') {
+        throw AppError.badRequest(
+          `Esta factura está en ${parsed?.foreignCurrency === 'USD' ? 'dólares' : 'moneda extranjera'} ` +
+            'y trae su tipo de cambio, pero no pudimos leerlo en la foto. Cargala con su XML, o dejá ' +
+            'que llegue por correo: así se registra con su tipo de cambio.',
+        );
+      }
       throw AppError.badRequest(
-        `Esta factura está en ${parsed?.foreignCurrency === 'USD' ? 'dólares' : 'moneda extranjera'}, ` +
-          'y no pudimos leer su tipo de cambio en la foto. Cargala con su XML, o dejá que llegue por ' +
-          'correo: así se registra con su tipo de cambio.',
+        decision.detail === 'choice'
+          ? 'No pudimos confirmar si la factura está en guaraníes o en dólares. Sacá la foto de ' +
+              'nuevo, que se vea bien la casilla marcada junto al total.'
+          : 'Leímos la factura en dos monedas distintas, así que no la guardamos. Sacá la foto de ' +
+              'nuevo, que se vea bien la moneda junto al total.',
       );
 
     case 'total':

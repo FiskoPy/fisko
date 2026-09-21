@@ -22,4 +22,5 @@ invoicesRouter.get('/', asyncHandler(invoicesController.list));
 invoicesRouter.get('/:id', asyncHandler(invoicesController.detail));
 invoicesRouter.patch('/:id/categoria', asyncHandler(invoicesController.categoria));
 invoicesRouter.patch('/:id/tipo', asyncHandler(invoicesController.tipo));
+invoicesRouter.patch('/:id/tipo-cambio', asyncHandler(invoicesController.tipoCambio));
 invoicesRouter.delete('/:id', asyncHandler(invoicesController.remove));

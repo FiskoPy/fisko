@@ -24,8 +24,22 @@ import type { Extraction } from '../../src/services/receipt-parser';
  *  - ecop-exenta: a RUC with a wrong check digit, and a 40-digit CDC;
  *  - minas281: a street address as the issuer's name;
  *  - primavera: 16 items that do not add up to the total.
+ *
+ * Two more from 2026-09-21, the handwritten talonarios of ocr-text (the
+ * landlord's name masked there; the buyer is the client's own company):
+ *  - domicia-usd: a dollar rent receipt read as guaraníes, with an IVA of
+ *    45,45 — the tick in "Son: ☐ Guaraníes ☒ Dólares" missed;
+ *  - cevelio-manuscrita: read right, in guaraníes.
  */
-export type AiFixture = 'minas281' | 'fox-kude' | 'primavera' | 'ecop-exenta' | 'baratao' | 'usd-rrtop';
+export type AiFixture =
+  | 'minas281'
+  | 'fox-kude'
+  | 'primavera'
+  | 'ecop-exenta'
+  | 'baratao'
+  | 'usd-rrtop'
+  | 'domicia-usd'
+  | 'cevelio-manuscrita';
 
 export function aiFixture(name: AiFixture): Extraction {
   return JSON.parse(readFileSync(join(__dirname, 'ai', `${name}.json`), 'utf8')) as Extraction;

@@ -75,6 +75,10 @@ model Invoice {
   moneda         String   @default("PYG")
   // dTiCam — exchange rate to PYG, present only when moneda != PYG.
   tipoCambio     Decimal? @db.Decimal(18, 6)
+  // Where tipoCambio came from when the document did not carry it: "dnit",
+  // the close the law names (Decreto 3107/2019, art. 13), or "manual". Null
+  // means the invoice printed its own rate.
+  tipoCambioFuente String?
   // Totais (gTotSub)
   totalOpe   Decimal @db.Decimal(18, 4) // dTotGralOpe
   totalIva   Decimal @db.Decimal(18, 4) // dTotIVA

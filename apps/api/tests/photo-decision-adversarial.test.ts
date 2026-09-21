@@ -27,6 +27,9 @@ const PAPER: Record<AiFixture, [VisionFixture, Truth] | null> = {
   baratao: ['baratao-talonario', { total: 160_000, iva10: 14_545, fecha: '2026-09-16', moneda: null }],
   'usd-rrtop': ['rrtop-usd-kude', { total: 1_538, iva10: 139.82, fecha: '2026-08-18', moneda: 'USD' }],
   'ecop-exenta': null, // no Vision fixture for this photo
+  // Text only, no word boxes to distort: see talonario-currency.test.ts.
+  'domicia-usd': null,
+  'cevelio-manuscrita': null,
 };
 
 /** The buyer, as the fixtures mask them — and, on the dollar invoice, the client's company. */

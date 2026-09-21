@@ -36,6 +36,9 @@ const envSchema = z.object({
   // Reading invoice photos with a vision model as well as the OCR parser (see
   // ai-reader). On by default when OPENAI_API_KEY is set; "off" turns it off.
   OCR_AI: z.enum(['on', 'off']).default('on'),
+  // Reading the DNIT's published exchange rates, for a foreign invoice that
+  // prints none (see exchange-rates). "off" in tests: no network.
+  DNIT_RATES: z.enum(['on', 'off']).default('on'),
 
   // Marco 2 phase 2D. An API key rather than a service-account JSON: the
   // client org enforces iam.disableServiceAccountKeyCreation.

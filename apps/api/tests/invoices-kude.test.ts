@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
 
@@ -11,6 +14,7 @@ vi.mock('../src/services/ocr', () => ({
 import { createApp } from '../src/app';
 import { prisma } from '../src/lib/prisma';
 import { importXml } from '../src/modules/invoices/invoices.service';
+import { parseDnitRates, resetRatesCache } from '../src/services/exchange-rates';
 import { extractText } from '../src/services/ocr';
 import { DTE_XML, REAL_CDC } from './fixtures/dte';
 
@@ -262,26 +266,81 @@ describe('an XML beside the photo of a different invoice with the same number', 
   });
 });
 
-describe('a photo of an invoice in dollars', () => {
+describe('a photo of an invoice in dollars that prints no rate', () => {
   beforeAll(newUser);
+  // The DNIT's table as served on 2026-09-21 (tests never reach the site).
+  beforeAll(() =>
+    resetRatesCache(
+      parseDnitRates(readFileSync(join(__dirname, 'fixtures', 'dnit', 'cotizaciones-2026.html'), 'utf8')),
+    ),
+  );
+  afterAll(() => resetRatesCache());
 
-  it('is refused and pointed at its XML, never stored as guaraníes', async () => {
-    // Stored as Gs 1.538 on 2026-09-19: in dollars its arithmetic holds.
-    photoReads(
-      lines(
-        'KuDE de Factura Electrónica',
-        'AGROQUIMICA EJEMPLO S.A.',
-        'RUC: 80054993-7',
-        'Moneda: Dólar americano',
-        'Fecha de emisión: 18/08/2026',
-        'Total Pago. 1.538,00',
-        'Gravadas 10%: 1.538,00',
-        'IVA 10%: 139,82',
-      ),
+  const dollars = (fecha: string) =>
+    lines(
+      'KuDE de Factura Electrónica',
+      'AGROQUIMICA EJEMPLO S.A.',
+      'RUC: 80054993-7',
+      'Moneda: Dólar americano',
+      `Fecha de emisión: ${fecha}`,
+      'Total Pago. 1.538,00',
+      'Gravadas 10%: 1.538,00',
+      'IVA 10%: 139,82',
     );
+  const patch = (id: string, what: string, body: object) =>
+    request(app).patch(`${base}/invoices/${id}/${what}`).set(auth()).send(body);
+
+  it('is stored in dollars at the DNIT rate the law names — never as guaraníes', async () => {
+    // Stored as Gs 1.538 on 2026-09-19: in dollars its arithmetic holds. Then
+    // refused, for a rate it does not print — which the law then takes from
+    // the DNIT, the close of the day before (2026-09-21).
+    photoReads(dollars('18/08/2026'));
+    const res = await postPhoto();
+    expect(res.status).toBe(201);
+    expect(res.body.invoice).toMatchObject({
+      moneda: 'USD',
+      totalOpe: 1538,
+      iva10: 139.82,
+      tipo: 'compra',
+      // A purchase: the selling rate of 17/08/2026.
+      tipoCambio: 6037.48,
+      tipoCambioFuente: 'dnit',
+      tipoCambioFecha: '2026-08-17',
+    });
+    // Said out loud: the rate was not on the paper.
+    expect(res.body.missing).toContain('Tipo de cambio (cotización DNIT del 17/08/2026)');
+  });
+
+  it('follows the side of the ledger, and takes a rate typed by hand', async () => {
+    const { id } = await prisma.invoice.findFirstOrThrow({ where: { userId } });
+
+    // A sale is converted at the buying rate.
+    const venta = await patch(id, 'tipo', { tipo: 'venta' });
+    expect(venta.body.invoice).toMatchObject({ tipo: 'venta', tipoCambio: 6027.92 });
+    await patch(id, 'tipo', { tipo: null });
+
+    const manual = await patch(id, 'tipo-cambio', { tipoCambio: 6030 });
+    expect(manual.status).toBe(200);
+    expect(manual.body.invoice).toMatchObject({ tipoCambio: 6030, tipoCambioFuente: 'manual' });
+
+    const back = await patch(id, 'tipo-cambio', { tipoCambio: null });
+    expect(back.body.invoice).toMatchObject({ tipoCambio: 6037.48, tipoCambioFuente: 'dnit' });
+  });
+
+  it('keeps a rate the invoice itself carries', async () => {
+    const { id } = await prisma.invoice.findFirstOrThrow({ where: { userId } });
+    await prisma.invoice.update({ where: { id }, data: { tipoCambio: 6027.92, tipoCambioFuente: null } });
+    const res = await patch(id, 'tipo-cambio', { tipoCambio: 6100 });
+    expect(res.status).toBe(400);
+    expect(res.body.error.message).toMatch(/propio tipo de cambio/);
+  });
+
+  it('waits for a business day the DNIT has not published yet', async () => {
+    // Tuesday 22/09 needs Monday's close; the table stops on Friday the 18th.
+    photoReads(dollars('22/09/2026'));
     const res = await postPhoto();
     expect(res.status).toBe(400);
-    expect(res.body.error.message).toMatch(/dólares/);
-    expect(await stored()).toEqual([]);
+    expect(res.body.error.message).toMatch(/todavía no está publicada/);
+    expect(await stored()).toHaveLength(1);
   });
 });

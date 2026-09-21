@@ -94,14 +94,18 @@ describe('when only one reader holds up', () => {
 
   it('the dollar invoice is stored in dollars, at the rate the model read', () => {
     const { parsed, text } = photo('rrtop-usd-kude');
-    // Alone, the parser refuses it: dollars with no exchange rate.
+    // Alone, the parser refuses it: dollars, and a printed rate ("Cotizacion:
+    // 6.027,92Gs.") it does not read — the one the law takes before the DNIT's.
     expect(decidePhoto(parsed, null, text, '80175384')).toMatchObject({
       kind: 'refuse',
       reason: 'moneda',
+      detail: 'rate',
     });
 
+    // Both read the same dollar amounts; the rate is the model's, confirmed by
+    // the printed guaraní total.
     const decision = decidePhoto(parsed, model('usd-rrtop'), text, '80175384');
-    expect(decision).toMatchObject({ kind: 'store', source: 'ai' });
+    expect(decision).toMatchObject({ kind: 'store', source: 'ocr+ai' });
     expect(decision.reading).toMatchObject({
       foreignCurrency: 'USD',
       tipoCambio: 6_027.92,

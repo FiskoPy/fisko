@@ -18,6 +18,9 @@ export default defineConfig({
       EMAIL_CRYPTO_KEY: process.env.EMAIL_CRYPTO_KEY ?? 'test-email-crypto-key-0123456789',
       // The model reader is a paid call: never from a test, even with a key in .env.
       OCR_AI: 'off',
+      // Nor the DNIT's site: a test that needs a rate hands the table in
+      // (see exchange-rates' resetRatesCache).
+      DNIT_RATES: 'off',
     },
     // Integration tests share a DB — run serially to avoid cross-test races.
     fileParallelism: false,
