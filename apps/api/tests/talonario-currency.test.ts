@@ -278,6 +278,29 @@ describe('neither currency on the model saying so alone', () => {
     totalIva: iva,
     items: [{ ...aiFixture('cevelio-manuscrita').items[0]!, precioUnitario: total, total }],
   });
+  it.each(['PYG', 'USD'] as const)(
+    'refuses a large guarani invoice with handwritten IVA cents, model %s',
+    (moneda) => {
+      const blocks = refigured(
+        text('cevelio-manuscrita-blocks'),
+        '900.000',
+        '81.818,18',
+        'Novecientos mil',
+      );
+      const rows = refigured(
+        text('cevelio-manuscrita-rows'),
+        '900.000',
+        '81.818,18',
+        'Novecientos mil',
+      );
+      expect(decide(blocks, rows, { ...invoiceOf(900_000, 81_818.18), moneda })).toMatchObject({
+        kind: 'refuse',
+        reason: 'moneda',
+        detail: 'choice',
+      });
+    },
+  );
+
   // Gs 1.000.000: its IVA, 90.909,09, rounded to the guaraní.
   const million = invoiceOf(1_000_000, 90_909);
 

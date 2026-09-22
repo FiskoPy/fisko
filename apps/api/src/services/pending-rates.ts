@@ -9,6 +9,18 @@ const BATCH = 20;
 /** How long a screen waits for them before it answers as things are. */
 const WAIT_MS = 2_500;
 
+type PendingCursor = { fechaEmision: Date; id: string };
+// Rotate past unavailable closes; they must not starve every later invoice.
+// This is only a scheduling hint, so eviction/restarts safely begin again.
+const cursors = new Map<string, PendingCursor>();
+const MAX_CURSORS = 1_000;
+
+function advanceCursor(userId: string, invoice: PendingCursor): void {
+  cursors.delete(userId);
+  cursors.set(userId, { fechaEmision: invoice.fechaEmision, id: invoice.id });
+  if (cursors.size > MAX_CURSORS) cursors.delete(cursors.keys().next().value!);
+}
+
 /**
  * fillPendingRates, waited for no longer than a screen should wait: a DNIT
  * site that hangs rather than fails would hold the list for every read's
@@ -41,17 +53,37 @@ export async function fillPendingRatesBriefly(userId: string): Promise<void> {
  */
 export async function fillPendingRates(userId: string): Promise<number> {
   try {
-    const pending = await prisma.invoice.findMany({
-      where: { userId, tipoCambioFuente: 'pendiente', tipoCambio: null },
-      select: { id: true, moneda: true, fechaEmision: true, emisorRuc: true, esVenta: true },
-      orderBy: { fechaEmision: 'asc' },
-      take: BATCH,
-    });
-    if (!pending.length) return 0;
+    const readBatch = (after?: PendingCursor) =>
+      prisma.invoice.findMany({
+        where: {
+          userId,
+          tipoCambioFuente: 'pendiente',
+          tipoCambio: null,
+          ...(after
+            ? {
+                OR: [
+                  { fechaEmision: { gt: after.fechaEmision } },
+                  { fechaEmision: after.fechaEmision, id: { gt: after.id } },
+                ],
+              }
+            : {}),
+        },
+        select: { id: true, moneda: true, fechaEmision: true, emisorRuc: true, esVenta: true },
+        orderBy: [{ fechaEmision: 'asc' }, { id: 'asc' }],
+        take: BATCH,
+      });
+    const cursor = cursors.get(userId);
+    let pending = await readBatch(cursor);
+    if (!pending.length && cursor) pending = await readBatch();
+    if (!pending.length) {
+      cursors.delete(userId);
+      return 0;
+    }
     const owner = await prisma.user.findUnique({ where: { id: userId }, select: { ruc: true } });
     const own = owner?.ruc ? normalizeRuc(owner.ruc) : null;
     let filled = 0;
     for (const inv of pending) {
+      advanceCursor(userId, inv);
       const venta = inv.esVenta ?? (own != null && normalizeRuc(inv.emisorRuc) === own);
       const found = await officialRate(inv.moneda, inv.fechaEmision, venta ? 'compra' : 'venta');
       if (typeof found === 'string') {
@@ -59,7 +91,12 @@ export async function fillPendingRates(userId: string): Promise<number> {
         continue;
       }
       const res = await prisma.invoice.updateMany({
-        where: { id: inv.id, tipoCambioFuente: 'pendiente', tipoCambio: null },
+        where: {
+          id: inv.id,
+          tipoCambioFuente: 'pendiente',
+          tipoCambio: null,
+          esVenta: inv.esVenta,
+        },
         data: { tipoCambio: found.rate, tipoCambioOtroLado: found.other, tipoCambioFuente: 'dnit' },
       });
       filled += res.count;

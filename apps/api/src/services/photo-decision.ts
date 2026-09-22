@@ -844,7 +844,8 @@ function choiceSettled(
   if (!ocr || ocr.foreignCurrency != null || !ocr.currencyChoice) return ocr;
   if (!model || !amountsSound(model)) return 'open';
   const chosen = model.foreignCurrency;
-  if (chosen != null && (chosen !== ocr.currencyChoice || !foreignShown(model, text))) return 'open';
+  if (chosen != null && (chosen !== ocr.currencyChoice || !foreignShown(model, text)
+    || (model.tipoCambio == null && (model.total ?? 0) >= LEAST_GUARANIES_ON_A_CHOICE))) return 'open';
   if (chosen == null && ((model.total ?? 0) < LEAST_GUARANIES_ON_A_CHOICE || !guaraniRounding(model))) {
     return 'open';
   }

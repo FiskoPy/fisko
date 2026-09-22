@@ -44,7 +44,8 @@ export type RateMiss = 'moneda' | 'pendiente' | 'ilegible' | 'sin-conexion';
 type DayRates = Map<string, { compra: number; venta: number }>;
 
 const PAGE = 'https://www.dnit.gov.py/web/portal-institucional/cotizaciones';
-const ARTICLES = 'https://www.dnit.gov.py/web/portal-institucional/softwares-y-sistemas/-/asset_publisher/aere/content/';
+const ARTICLES =
+  'https://www.dnit.gov.py/web/portal-institucional/softwares-y-sistemas/-/asset_publisher/aere/content/';
 /** Vision can take 25 s of the app's 60: the rate gets what is left, and less. */
 const TIMEOUT_MS = 8_000;
 /** A month read live is not read again for a day it lacks before this long. */
@@ -63,8 +64,19 @@ const COLUMNS: [RegExp, string][] = [
 ];
 
 const MESES: Record<string, number> = {
-  enero: 1, febrero: 2, marzo: 3, abril: 4, mayo: 5, junio: 6, julio: 7, agosto: 8,
-  septiembre: 9, setiembre: 9, octubre: 10, noviembre: 11, diciembre: 12,
+  enero: 1,
+  febrero: 2,
+  marzo: 3,
+  abril: 4,
+  mayo: 5,
+  junio: 6,
+  julio: 7,
+  agosto: 8,
+  septiembre: 9,
+  setiembre: 9,
+  octubre: 10,
+  noviembre: 11,
+  diciembre: 12,
 };
 
 const cellsOf = (row: string): string[] =>
@@ -88,7 +100,13 @@ const rateOf = (cell: string | undefined): number | null => {
   const comma = s.lastIndexOf(',');
   const point = s.lastIndexOf('.');
   const decimalAt =
-    comma >= 0 && point >= 0 ? Math.max(comma, point) : comma >= 0 ? comma : point >= 0 && !/\.\d{3}$/.test(s) ? point : -1;
+    comma >= 0 && point >= 0
+      ? Math.max(comma, point)
+      : comma >= 0
+        ? comma
+        : point >= 0 && !/\.\d{3}$/.test(s)
+          ? point
+          : -1;
   const whole = (decimalAt >= 0 ? s.slice(0, decimalAt) : s).replace(/[.,]/g, '');
   const n = Number(decimalAt >= 0 ? `${whole}.${s.slice(decimalAt + 1)}` : whole);
   return Number.isFinite(n) && n > 0 ? n : null;
@@ -135,7 +153,8 @@ export function parseDnitRates(html: string): DayRates {
   return out;
 }
 
-const dayBefore = (d: Date): Date => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - 1));
+const dayBefore = (d: Date): Date =>
+  new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - 1));
 const ymdOf = (d: Date): string => d.toISOString().slice(0, 10);
 
 let snapshotRates: DayRates | null = null;
@@ -172,50 +191,198 @@ function knownRates(): DayRates {
   return known;
 }
 
-async function fetchPage(url: string): Promise<DayRates | null> {
+async function fetchText(
+  url: string,
+  init: RequestInit = {},
+  timeout = TIMEOUT_MS,
+): Promise<string | null> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
-  const where = url.replace(/^https:\/\/[^/]+/, '');
+  const timer = setTimeout(() => controller.abort(), timeout);
   try {
-    const res = await fetch(url, { signal: controller.signal, headers: { 'user-agent': 'Mozilla/5.0 Fisko' } });
-    if (!res.ok) {
-      logger.warn({ status: res.status, where }, 'DNIT rates page answered an error');
-      return null;
-    }
-    const rates = parseDnitRates(await res.text());
-    if (!rates.size) logger.warn({ where }, 'DNIT rates page carried no rates');
-    return rates.size ? rates : null;
+    const res = await fetch(url, {
+      ...init,
+      signal: controller.signal,
+      headers: { 'user-agent': 'Mozilla/5.0 Fisko', ...init.headers },
+    });
+    return res.ok ? await res.text() : null;
   } catch (err) {
-    logger.warn({ err: (err as Error).message, where }, 'DNIT rates page could not be read');
+    logger.warn({ err: (err as Error).message }, 'official rates could not be read');
     return null;
   } finally {
     clearTimeout(timer);
   }
 }
 
-const MONTH_SLUGS = [
-  'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
-  'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
+const MONTH_NAMES = [
+  'enero',
+  'febrero',
+  'marzo',
+  'abril',
+  'mayo',
+  'junio',
+  'julio',
+  'agosto',
+  'septiembre',
+  'octubre',
+  'noviembre',
+  'diciembre',
 ];
+const ARTICLE_IDS: Record<string, string> = {
+  '2026-09': '3614826',
+  '2026-08': '3597333',
+  '2026-07': '3430859',
+  '2026-06': '3287142',
+  '2026-05': '3133716',
+  '2026-04': '2971601',
+  '2026-03': '2826609',
+  '2026-02': '2672611',
+  '2026-01': '2490517',
+  '2025-12': '2354692',
+  '2025-10': '2115359',
+};
+const cleanTitle = (s: string) =>
+  s
+    .replace(/<[^>]*>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .trim()
+    .replace(/\.$/, '')
+    .replace(/\s+/g, ' ')
+    .toLowerCase();
 
-/**
- * The closes of [want]'s month, read live: from the page with every month —
- * and, since that page went 404 on 2026-09-22, from the month's own article.
- * An article's address lags its content by a month (the one at
- * "…-mes-de-agosto-2026" holds September's table), so the previous month's
- * address is tried first, then the month's own. Each article names its month
- * in its title, which is what the rows are filed under.
- */
+async function articleId(want: Date, read: typeof fetchText): Promise<string | null> {
+  const knownId = ARTICLE_IDS[ymdOf(want).slice(0, 7)];
+  if (knownId) return knownId;
+  const month =
+    want.getUTCMonth() === 8 && want.getUTCFullYear() < 2018
+      ? 'setiembre'
+      : MONTH_NAMES[want.getUTCMonth()];
+  const title = `Tipos de cambios del mes de ${month} ${want.getUTCFullYear()}`;
+  const query = encodeURIComponent(`"${title}"`);
+  const json = await read(
+    `https://www.dnit.gov.py/o/search/v1.0/suggestions?destinationFriendlyURL=%2Fsearch&plid=62&search=${query}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify([{ contributorName: 'basic', displayGroupName: 's', size: 10 }]),
+    },
+  );
+  try {
+    const data = JSON.parse(json ?? '{}');
+    for (const item of data.items ?? []) {
+      for (const suggestion of item.suggestions ?? []) {
+        if (
+          typeof suggestion.text !== 'string' ||
+          cleanTitle(suggestion.text) !== cleanTitle(title)
+        )
+          continue;
+        const id = String(suggestion.attributes?.assetURL ?? '').match(/assetEntryId=(\d+)/)?.[1];
+        if (id) return id;
+      }
+    }
+  } catch {
+    /* A maintenance page is not a search result. */
+  }
+  const html = await read(`https://www.dnit.gov.py/web/portal-institucional/search?q=${query}`);
+  for (const link of (html ?? '').matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/gi)) {
+    if (cleanTitle(link[2]!) !== cleanTitle(title)) continue;
+    const id = link[1]!.match(/assetEntryId=(\d+)/)?.[1];
+    if (id) return id;
+  }
+  return null;
+}
+
+/** Only explicit ND cells between published values carry the previous close. */
+function bcpSide(html: string, year: number): Map<string, number> {
+  const cells = new Map<string, number | null>();
+  for (const table of html.matchAll(
+    /<table\b[^>]*id=["']cotizacion-interbancaria["'][^>]*>([\s\S]*?)<\/table>/gi,
+  )) {
+    const rows = [...table[1]!.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi)].map((m) => cellsOf(m[1]!));
+    const heading = rows.find((r) => r.includes('ENE') && r.includes('DIC'));
+    if (!heading) continue;
+    const months = [
+      'ENE',
+      'FEB',
+      'MAR',
+      'ABR',
+      'MAY',
+      'JUN',
+      'JUL',
+      'AGO',
+      'SEP',
+      'OCT',
+      'NOV',
+      'DIC',
+    ];
+    for (const row of rows) {
+      if (!/^\d{1,2}$/.test(row[0] ?? '')) continue;
+      for (let month = 0; month < 12; month++) {
+        const date = new Date(Date.UTC(year, month, Number(row[0])));
+        if (date.getUTCMonth() !== month) continue;
+        const cell = row[heading.indexOf(months[month]!)];
+        const rate = rateOf(cell);
+        if (rate != null || cell === 'ND') cells.set(ymdOf(date), rate);
+      }
+    }
+  }
+  const out = new Map<string, number>();
+  const published = [...cells]
+    .filter(([, value]) => value != null)
+    .map(([date]) => date)
+    .sort();
+  const last = published.at(-1);
+  let previous: number | null = null;
+  for (const date of [...cells.keys()].sort()) {
+    if (!last || date > last) break;
+    const value = cells.get(date)!;
+    if (value != null) previous = value;
+    if (previous != null) out.set(date, previous);
+  }
+  return out;
+}
+
+export function parseBcpRates(compraHtml: string, ventaHtml: string, year: number): DayRates {
+  const compra = bcpSide(compraHtml, year);
+  const venta = bcpSide(ventaHtml, year);
+  const out: DayRates = new Map();
+  for (const [date, buy] of compra) {
+    const sell = venta.get(date);
+    if (sell != null) out.set(`${date}|USD`, { compra: buy, venta: sell });
+  }
+  return out;
+}
+
 async function fetchRates(want: Date): Promise<DayRates | null> {
   if (env.DNIT_RATES === 'off') return null;
-  const all = await fetchPage(PAGE);
-  if (all) return all;
-  const out: DayRates = new Map();
-  for (const back of [1, 0]) {
-    const month = new Date(Date.UTC(want.getUTCFullYear(), want.getUTCMonth() - back, 1));
-    const slug = `tipos-de-cambios-del-mes-de-${MONTH_SLUGS[month.getUTCMonth()]}-${month.getUTCFullYear()}`;
-    for (const [k, v] of (await fetchPage(`${ARTICLES}${slug}`)) ?? []) out.set(k, v);
-    if ([...out.keys()].some((k) => k.startsWith(ymdOf(want)))) break;
+  // Leave room for OCR and persistence within the mobile 60-second timeout.
+  const deadline = Date.now() + 24_000;
+  const read: typeof fetchText = (url, init) => {
+    const remaining = deadline - Date.now();
+    return remaining > 0
+      ? fetchText(url, init, Math.min(TIMEOUT_MS, remaining))
+      : Promise.resolve(null);
+  };
+  const out = parseDnitRates((await read(PAGE)) ?? '');
+  const date = ymdOf(want);
+  // A valid but stale index is not evidence that the requested day is absent.
+  if (!COLUMNS.every(([, currency]) => out.has(`${date}|${currency}`))) {
+    const id = await articleId(want, read);
+    if (id) {
+      for (const [key, value] of parseDnitRates((await read(`${ARTICLES}id/${id}`)) ?? ''))
+        out.set(key, value);
+    }
+  }
+  if (!out.has(`${date}|USD`)) {
+    const base = `https://www.bcp.gov.py/webapps/web/cotizacion/referencial-fluctuante/anual?anho=${want.getUTCFullYear()}`;
+    const [buy, sell] = await Promise.all([
+      read(`${base}&tipoOperacion=compra`),
+      read(`${base}&tipoOperacion=venta`),
+    ]);
+    if (buy && sell) {
+      for (const [key, value] of parseBcpRates(buy, sell, want.getUTCFullYear())) {
+        if (!out.has(key)) out.set(key, value);
+      }
+    }
   }
   return out.size ? out : null;
 }
@@ -268,7 +435,9 @@ export function pickRate(
   issued: Date,
   side: RateSide,
 ): OfficialRate | RateMiss {
-  const days = [...rates.keys()].filter((k) => k.endsWith(`|${currency}`)).map((k) => k.slice(0, 10));
+  const days = [...rates.keys()]
+    .filter((k) => k.endsWith(`|${currency}`))
+    .map((k) => k.slice(0, 10));
   if (!days.length) return 'moneda';
   const last = days.reduce((a, b) => (a > b ? a : b));
   const want = dayBefore(issued);

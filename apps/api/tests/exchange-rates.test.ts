@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { env } from '../src/config/env';
 import {
   officialRate,
+  parseBcpRates,
   parseDnitRates,
   pickRate,
   resetRatesCache,
@@ -48,12 +49,42 @@ describe("the DNIT's table", () => {
 
   it('reads three decimals as decimals', () => {
     // "9.436,253": the pound's buying rate, 20-22/08/2021.
-    const page = html.replace('<td style="text-align: center;">7.993,12</td>', '<td style="text-align: center;">7.993,125</td>');
+    const page = html.replace(
+      '<td style="text-align: center;">7.993,12</td>',
+      '<td style="text-align: center;">7.993,125</td>',
+    );
     expect(parseDnitRates(page).get('2026-09-01|GBP')?.compra).toBe(7993.125);
   });
 });
 
 describe('the rate for an invoice', () => {
+  it('bounds all fallback requests together so photo import can save a pending invoice', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        (_url: string, init: RequestInit) =>
+          new Promise((_resolve, reject) => {
+            init.signal?.addEventListener('abort', () => reject(new Error('timeout')));
+          }),
+      ),
+    );
+    env.DNIT_RATES = 'on';
+    try {
+      let done = false;
+      const read = officialRate('USD', day('2026-10-02'), 'venta').then((result) => {
+        done = true;
+        return result;
+      });
+      await vi.advanceTimersByTimeAsync(24_001);
+      expect(done).toBe(true);
+      await expect(read).resolves.toBe('sin-conexion');
+    } finally {
+      env.DNIT_RATES = 'off';
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    }
+  });
   it("is the day before's close: the selling rate for a purchase, the buying rate for a sale", () => {
     // Residencial Domicia, USD 500 issued Monday 31/08/2026: Sunday's row,
     // which carries Friday's close.
@@ -115,7 +146,9 @@ describe('the rate for an invoice', () => {
         other: 5915.26,
         date: '2026-08-30',
       });
-      await expect(officialRate('EUR', day('2019-03-15'), 'compra')).resolves.toMatchObject({ date: '2019-03-14' });
+      await expect(officialRate('EUR', day('2019-03-15'), 'compra')).resolves.toMatchObject({
+        date: '2019-03-14',
+      });
       expect(fetchMock).not.toHaveBeenCalled();
     } finally {
       env.DNIT_RATES = 'off';
@@ -123,21 +156,20 @@ describe('the rate for an invoice', () => {
     }
   });
 
-  it("says so when a day past what is known cannot be read", async () => {
+  it('says so when a day past what is known cannot be read', async () => {
     // Tests never reach the site (DNIT_RATES=off), as production cannot when it is down.
     await expect(officialRate('USD', day('2026-09-23'), 'venta')).resolves.toBe('sin-conexion');
   });
 
   it("reads the month's own article when the page with every month is gone", async () => {
-    // The article at "…-mes-de-agosto-2026" holds September's table; this
-    // one has gained Monday the 21st.
+    // September's stable asset ID has gained Monday the 21st.
     const september = html.split('data-analytics-asset-title="')[1] as string;
     const article = `<div data-analytics-asset-title="${september.replace(
       '<td align="center">18</td>',
       '<td align="center">21</td><td align="center">5.931,00</td><td align="center">5.940,00</td></tr><tr><td align="center">18</td>',
     )}`;
     const fetchMock = vi.fn(async (url: string) =>
-      url.endsWith('tipos-de-cambios-del-mes-de-agosto-2026')
+      url.endsWith('/id/3614826')
         ? { ok: true, status: 200, text: async () => article }
         : { ok: false, status: 404, text: async () => 'not found' },
     );
@@ -150,7 +182,7 @@ describe('the rate for an invoice', () => {
       });
       expect(fetchMock.mock.calls.map(([u]) => (u as string).split('/').pop())).toEqual([
         'cotizaciones',
-        'tipos-de-cambios-del-mes-de-agosto-2026',
+        '3614826',
       ]);
     } finally {
       env.DNIT_RATES = 'off';
@@ -167,6 +199,119 @@ describe('the rate for an invoice', () => {
       const tried = fetchMock.mock.calls.length; // the page, then the month's articles
       await expect(officialRate('USD', day('2026-09-24'), 'venta')).resolves.toBe('sin-conexion');
       expect(fetchMock).toHaveBeenCalledTimes(tried);
+    } finally {
+      env.DNIT_RATES = 'off';
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
+describe('BCP fallback', () => {
+  it('carries ND only between actual closes and keeps buying and selling separate', () => {
+    const bcp = parseBcpRates(
+      ...(['compra', 'venta'].map((side) =>
+        readFileSync(join(__dirname, 'fixtures', 'dnit', `bcp-2026-${side}.html`), 'utf8'),
+      ) as [string, string]),
+      2026,
+    );
+    expect(bcp.get('2026-08-30|USD')).toEqual({ compra: 5915.26, venta: 5921.39 });
+    expect(bcp.get('2026-09-21|USD')).toEqual({ compra: 5945.25, venta: 5955.36 });
+    expect(bcp.has('2026-09-22|USD')).toBe(false);
+    expect(bcp.has('2026-02-30|USD')).toBe(false);
+  });
+  it('reads both annual tables, preserves the two sides and leaves future days pending', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        const side = new URL(url).searchParams.get('tipoOperacion');
+        return url.startsWith('https://www.bcp.gov.py/') && side
+          ? {
+              ok: true,
+              text: async () =>
+                readFileSync(join(__dirname, 'fixtures', 'dnit', `bcp-2026-${side}.html`), 'utf8'),
+            }
+          : { ok: false, status: 404 };
+      }),
+    );
+    env.DNIT_RATES = 'on';
+    try {
+      await expect(officialRate('USD', day('2026-09-22'), 'venta')).resolves.toMatchObject({
+        rate: 5955.36,
+        date: '2026-09-21',
+      });
+      await expect(officialRate('USD', day('2026-09-23'), 'venta')).resolves.toBe('pendiente');
+      await expect(officialRate('EUR', day('2026-09-22'), 'venta')).resolves.toBe('pendiente');
+    } finally {
+      env.DNIT_RATES = 'off';
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('discovers a new month by its exact title and asset ID', async () => {
+    const article =
+      '<div data-analytics-asset-title="Tipos de cambios del mes de Octubre 2026"><table><tr><td>Dólar</td></tr><tr><td>1</td><td>5.930,00</td><td>5.940,00</td></tr></table></div>';
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.includes('/suggestions?'))
+          return {
+            ok: true,
+            text: async () =>
+              JSON.stringify({
+                items: [
+                  {
+                    suggestions: [
+                      {
+                        text: 'Tipos de cambios del mes de Noviembre 2026',
+                        attributes: { assetURL: '?assetEntryId=111' },
+                      },
+                      {
+                        text: 'Tipos de cambios del mes de Octubre  2026.',
+                        attributes: { assetURL: '?assetEntryId=999' },
+                      },
+                    ],
+                  },
+                ],
+              }),
+          };
+        if (url.endsWith('/id/999')) return { ok: true, text: async () => article };
+        return { ok: false, status: 404 };
+      }),
+    );
+    env.DNIT_RATES = 'on';
+    try {
+      await expect(officialRate('USD', day('2026-10-02'), 'venta')).resolves.toMatchObject({
+        rate: 5940,
+        other: 5930,
+      });
+    } finally {
+      env.DNIT_RATES = 'off';
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('uses the titled HTML search result when suggestions are unavailable', async () => {
+    const article =
+      '<div data-analytics-asset-title="Tipos de cambios del mes de Octubre 2026"><table><tr><td>Dólar</td></tr><tr><td>1</td><td>5.930,00</td><td>5.940,00</td></tr></table></div>';
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.includes('/search?q='))
+          return {
+            ok: true,
+            text: async () =>
+              '<a href="/search?x_assetEntryId=999&amp;type=content"><h2 class="item__title">Tipos de cambios del mes de Octubre 2026.</h2></a>',
+          };
+        if (url.endsWith('/id/999')) return { ok: true, text: async () => article };
+        return { ok: false, status: 404 };
+      }),
+    );
+    env.DNIT_RATES = 'on';
+    try {
+      await expect(officialRate('USD', day('2026-10-02'), 'venta')).resolves.toMatchObject({
+        rate: 5940,
+        other: 5930,
+      });
     } finally {
       env.DNIT_RATES = 'off';
       vi.unstubAllGlobals();

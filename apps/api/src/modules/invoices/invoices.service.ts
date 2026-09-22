@@ -504,34 +504,46 @@ export async function setTipo(
   id: string,
   tipo: 'venta' | 'compra' | null,
 ): Promise<PublicInvoice> {
-  const invoice = await prisma.invoice.findFirst({ where: { id, userId } });
-  if (!invoice) throw AppError.notFound('Factura no encontrada');
-  const ownRuc = await ownRucOf(userId);
   const esVenta = tipo == null ? null : tipo === 'venta';
-  let rate: { tipoCambio: number | Prisma.Decimal; tipoCambioOtroLado: number | Prisma.Decimal } | Record<string, never> =
-    {};
-  const before = ledgerSideOf(invoice, ownRuc).tipo;
-  const after = ledgerSideOf({ emisorRuc: invoice.emisorRuc, esVenta }, ownRuc).tipo;
-  if (invoice.tipoCambioFuente === 'dnit' && before !== after) {
-    if (invoice.tipoCambio != null && invoice.tipoCambioOtroLado != null) {
-      rate = { tipoCambio: invoice.tipoCambioOtroLado, tipoCambioOtroLado: invoice.tipoCambio };
-    } else {
-      // Stored before both closes were kept: ask the DNIT. With its page
-      // down the rate stays as it was, and the side still changes.
-      try {
-        const found = await dnitRate(invoice.moneda, invoice.fechaEmision, after);
-        rate = { tipoCambio: found.rate, tipoCambioOtroLado: found.other };
-      } catch (err) {
-        logger.warn({ err: (err as Error).message }, 'set-tipo: DNIT rate kept, not recomputed');
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const invoice = await prisma.invoice.findFirst({ where: { id, userId } });
+    if (!invoice) throw AppError.notFound('Factura no encontrada');
+    const ownRuc = await ownRucOf(userId);
+    let rate: { tipoCambio: number | Prisma.Decimal; tipoCambioOtroLado: number | Prisma.Decimal } | Record<string, never> =
+      {};
+    const before = ledgerSideOf(invoice, ownRuc).tipo;
+    const after = ledgerSideOf({ emisorRuc: invoice.emisorRuc, esVenta }, ownRuc).tipo;
+    if (invoice.tipoCambioFuente === 'dnit' && before !== after) {
+      if (invoice.tipoCambio != null && invoice.tipoCambioOtroLado != null) {
+        rate = { tipoCambio: invoice.tipoCambioOtroLado, tipoCambioOtroLado: invoice.tipoCambio };
+      } else {
+        // Stored before both closes were kept: ask the DNIT. With its page
+        // down the rate stays as it was, and the side still changes.
+        try {
+          const found = await dnitRate(invoice.moneda, invoice.fechaEmision, after);
+          rate = { tipoCambio: found.rate, tipoCambioOtroLado: found.other };
+        } catch (err) {
+          logger.warn({ err: (err as Error).message }, 'set-tipo: DNIT rate kept, not recomputed');
+        }
       }
     }
+    // Backfill or a manual rate may have completed since our read. Recompute
+    // from that new state instead of attaching the old close to the new side.
+    const changed = await prisma.invoice.updateMany({
+      where: {
+        id, userId, esVenta: invoice.esVenta,
+        tipoCambioFuente: invoice.tipoCambioFuente,
+        tipoCambio: invoice.tipoCambio,
+        tipoCambioOtroLado: invoice.tipoCambioOtroLado,
+      },
+      data: { esVenta, ...rate },
+    });
+    if (!changed.count) continue;
+    const updated = await prisma.invoice.findFirst({ where: { id, userId }, include: { items: true } });
+    if (!updated) throw AppError.notFound('Factura no encontrada');
+    return toPublicInvoice(updated, ownRuc);
   }
-  const updated = await prisma.invoice.update({
-    where: { id },
-    data: { esVenta, ...rate },
-    include: { items: true },
-  });
-  return toPublicInvoice(updated, ownRuc);
+  throw AppError.conflict('La factura cambió mientras la editabas. Volvé a intentar.');
 }
 
 /**
