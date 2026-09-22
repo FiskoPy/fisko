@@ -1,4 +1,5 @@
 import { env } from '../config/env';
+import { DNIT_SNAPSHOT, DNIT_SNAPSHOT_CURRENCIES } from '../data/dnit-snapshot';
 import { logger } from '../lib/logger';
 
 /**
@@ -17,6 +18,14 @@ import { logger } from '../lib/logger';
  * of September 2026 — a Friday and its weekend — read the same). A purchase is
  * converted at the selling rate, the one the buyer pays for the currency; a
  * sale at the buying rate.
+ *
+ * Where the closes come from, in order: a snapshot of the DNIT's table from
+ * 2019 to 18/09/2026 (data/dnit-snapshot), so a day long published never
+ * depends on a site staying up; then what was read live since the process
+ * started — the page with every month, and, that page having gone 404 on the
+ * night of 2026-09-21, the month's own article. When nothing answers, the
+ * caller stores the invoice without a rate and fills it in later
+ * (pending-rates), rather than refuse an invoice it read.
  */
 
 export type RateSide = 'compra' | 'venta';
@@ -35,13 +44,12 @@ export type RateMiss = 'moneda' | 'pendiente' | 'ilegible' | 'sin-conexion';
 type DayRates = Map<string, { compra: number; venta: number }>;
 
 const PAGE = 'https://www.dnit.gov.py/web/portal-institucional/cotizaciones';
+const ARTICLES = 'https://www.dnit.gov.py/web/portal-institucional/softwares-y-sistemas/-/asset_publisher/aere/content/';
 /** Vision can take 25 s of the app's 60: the rate gets what is left, and less. */
-const TIMEOUT_MS = 10_000;
-/** A day not in the table yet is looked for again after this long… */
+const TIMEOUT_MS = 8_000;
+/** A month read live is not read again for a day it lacks before this long. */
 const FRESH_MS = 60 * 60 * 1000;
-/** …and the table is read again after this, for a row the DNIT corrected. */
-const STALE_MS = 12 * 60 * 60 * 1000;
-/** After a failed read, the page is left alone this long: an outage is not retried per invoice. */
+/** After a failed read, the site is left alone this long: an outage is not retried per invoice. */
 const BACKOFF_MS = 5 * 60 * 1000;
 
 /** The table's column headings, and the currency each one is. */
@@ -127,49 +135,122 @@ export function parseDnitRates(html: string): DayRates {
   return out;
 }
 
-let cache: { at: number; rates: DayRates } | null = null;
+const dayBefore = (d: Date): Date => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - 1));
+const ymdOf = (d: Date): string => d.toISOString().slice(0, 10);
+
+let snapshotRates: DayRates | null = null;
+
+/** The closes read from the DNIT's page on 2026-09-21 (see data/dnit-snapshot). */
+function snapshot(): DayRates {
+  if (snapshotRates) return snapshotRates;
+  const out: DayRates = new Map();
+  for (const line of DNIT_SNAPSHOT.split('\n')) {
+    const [date, ...columns] = line.split('|');
+    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+    columns.forEach((column, k) => {
+      const [compra, venta] = column.split(' ').map(Number);
+      const currency = DNIT_SNAPSHOT_CURRENCIES[k];
+      if (currency && compra && venta) out.set(`${date}|${currency}`, { compra, venta });
+    });
+  }
+  snapshotRates = out;
+  return out;
+}
+
+/** What was read live since the process started, over the snapshot. */
+let live: DayRates = new Map();
+let known: DayRates | null = null;
+/** When each month ('YYYY-MM') was last read live, and when a read last failed. */
+const readAt = new Map<string, number>();
 let failedAt = 0;
 
-async function fetchRates(): Promise<DayRates | null> {
-  if (env.DNIT_RATES === 'off') return null;
+/** The snapshot with whatever was read live over it. */
+function knownRates(): DayRates {
+  if (known) return known;
+  known = new Map(snapshot());
+  for (const [k, v] of live) known.set(k, v);
+  return known;
+}
+
+async function fetchPage(url: string): Promise<DayRates | null> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  const where = url.replace(/^https:\/\/[^/]+/, '');
   try {
-    const res = await fetch(PAGE, { signal: controller.signal, headers: { 'user-agent': 'Mozilla/5.0 Fisko' } });
+    const res = await fetch(url, { signal: controller.signal, headers: { 'user-agent': 'Mozilla/5.0 Fisko' } });
     if (!res.ok) {
-      logger.warn({ status: res.status }, 'DNIT rates page answered an error');
+      logger.warn({ status: res.status, where }, 'DNIT rates page answered an error');
       return null;
     }
     const rates = parseDnitRates(await res.text());
-    if (!rates.size) {
-      logger.warn('DNIT rates page carried no rates — its layout may have changed');
-      return null;
-    }
-    return rates;
+    if (!rates.size) logger.warn({ where }, 'DNIT rates page carried no rates');
+    return rates.size ? rates : null;
   } catch (err) {
-    logger.warn({ err: (err as Error).message }, 'DNIT rates page could not be read');
+    logger.warn({ err: (err as Error).message, where }, 'DNIT rates page could not be read');
     return null;
   } finally {
     clearTimeout(timer);
   }
 }
 
+const MONTH_SLUGS = [
+  'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+  'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
+];
+
 /**
- * The table, read again when it is older than [maxAge] — unless the page
- * failed a moment ago. A stale table still answers for the days it has.
+ * The closes of [want]'s month, read live: from the page with every month —
+ * and, since that page went 404 on 2026-09-22, from the month's own article.
+ * An article's address lags its content by a month (the one at
+ * "…-mes-de-agosto-2026" holds September's table), so the previous month's
+ * address is tried first, then the month's own. Each article names its month
+ * in its title, which is what the rows are filed under.
  */
-async function ratesTable(maxAge: number): Promise<{ rates: DayRates | null; read: boolean }> {
-  const now = Date.now();
-  if (cache && now - cache.at < maxAge) return { rates: cache.rates, read: false };
-  if (now - failedAt < BACKOFF_MS) return { rates: cache?.rates ?? null, read: false };
-  const rates = await fetchRates();
-  if (rates) cache = { at: Date.now(), rates };
-  else failedAt = Date.now();
-  return { rates: cache?.rates ?? null, read: true };
+async function fetchRates(want: Date): Promise<DayRates | null> {
+  if (env.DNIT_RATES === 'off') return null;
+  const all = await fetchPage(PAGE);
+  if (all) return all;
+  const out: DayRates = new Map();
+  for (const back of [1, 0]) {
+    const month = new Date(Date.UTC(want.getUTCFullYear(), want.getUTCMonth() - back, 1));
+    const slug = `tipos-de-cambios-del-mes-de-${MONTH_SLUGS[month.getUTCMonth()]}-${month.getUTCFullYear()}`;
+    for (const [k, v] of (await fetchPage(`${ARTICLES}${slug}`)) ?? []) out.set(k, v);
+    if ([...out.keys()].some((k) => k.startsWith(ymdOf(want)))) break;
+  }
+  return out.size ? out : null;
 }
 
-const dayBefore = (d: Date): Date => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - 1));
-const ymdOf = (d: Date): string => d.toISOString().slice(0, 10);
+/**
+ * Reads [want]'s month live — unless it was read within the hour (the day is
+ * then simply not out yet), or a read failed within five minutes. Whether
+ * something readable answered.
+ */
+async function readLive(want: Date): Promise<boolean> {
+  const month = ymdOf(want).slice(0, 7);
+  const now = Date.now();
+  const last = readAt.get(month);
+  if (last != null && now - last < FRESH_MS) return true;
+  if (now - failedAt < BACKOFF_MS) return false;
+  // The list and the month open together in the app: one read serves both.
+  const running = reading.get(month);
+  if (running) return running;
+  const read = (async () => {
+    const rates = await fetchRates(want);
+    if (!rates) {
+      failedAt = Date.now();
+      return false;
+    }
+    for (const [k, v] of rates) live.set(k, v);
+    known = null;
+    readAt.set(month, Date.now());
+    return true;
+  })().finally(() => reading.delete(month));
+  reading.set(month, read);
+  return read;
+}
+
+/** Reads under way, by month. */
+const reading = new Map<string, Promise<boolean>>();
 
 /**
  * The close to use for [currency] on an invoice issued on [issued]: the row
@@ -230,25 +311,29 @@ function likeItsNeighbours(
   return true;
 }
 
-/** The official close for an invoice, or why there is none. */
+/**
+ * The official close for an invoice, or why there is none.
+ *
+ * A day the snapshot or an earlier read has is answered with no request. A
+ * day past them — or one that could not be read — is looked for live, once:
+ * 'sin-conexion' when nothing answered, 'pendiente' when the DNIT has not
+ * published it yet.
+ */
 export async function officialRate(
   currency: string,
   issued: Date,
   side: RateSide,
 ): Promise<OfficialRate | RateMiss> {
-  const first = await ratesTable(STALE_MS);
-  let picked = first.rates ? pickRate(first.rates, currency, issued, side) : 'sin-conexion';
-  // The day may have been published since the table was read — once per
-  // lookup, and not when this lookup has just read it.
-  if (!first.read && (picked === 'pendiente' || picked === 'sin-conexion')) {
-    const again = await ratesTable(FRESH_MS);
-    if (again.rates) picked = pickRate(again.rates, currency, issued, side);
-  }
-  return picked;
+  const picked = pickRate(knownRates(), currency, issued, side);
+  if (typeof picked !== 'string' || picked === 'moneda') return picked;
+  if (!(await readLive(dayBefore(issued)))) return picked === 'pendiente' ? 'sin-conexion' : picked;
+  return pickRate(knownRates(), currency, issued, side);
 }
 
-/** For tests: forget the table read so far, and any failure. */
+/** For tests: forget what was read live — or take [rates] as read — and any failure. */
 export function resetRatesCache(rates: DayRates | null = null): void {
-  cache = rates ? { at: Date.now(), rates } : null;
+  live = new Map(rates ?? []);
+  known = null;
+  readAt.clear();
   failedAt = 0;
 }

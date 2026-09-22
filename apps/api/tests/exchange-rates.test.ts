@@ -104,13 +104,58 @@ describe('the rate for an invoice', () => {
     expect(pickRate(typo, 'USD', day('2026-08-31'), 'venta')).toBe('ilegible');
   });
 
-  it("says so when the DNIT's page cannot be read", async () => {
+  it('answers a day already published with no request — the site went 404 the night it was read', async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new Error('should not be called'));
+    vi.stubGlobal('fetch', fetchMock);
+    env.DNIT_RATES = 'on';
+    try {
+      // Residencial Domicia's rate, from the snapshot of the DNIT's page.
+      await expect(officialRate('USD', day('2026-08-31'), 'venta')).resolves.toMatchObject({
+        rate: 5921.39,
+        other: 5915.26,
+        date: '2026-08-30',
+      });
+      await expect(officialRate('EUR', day('2019-03-15'), 'compra')).resolves.toMatchObject({ date: '2019-03-14' });
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      env.DNIT_RATES = 'off';
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("says so when a day past what is known cannot be read", async () => {
     // Tests never reach the site (DNIT_RATES=off), as production cannot when it is down.
-    await expect(officialRate('USD', day('2026-08-31'), 'venta')).resolves.toBe('sin-conexion');
-    resetRatesCache(rates);
-    await expect(officialRate('USD', day('2026-08-31'), 'venta')).resolves.toMatchObject({
-      rate: 5921.39,
-    });
+    await expect(officialRate('USD', day('2026-09-23'), 'venta')).resolves.toBe('sin-conexion');
+  });
+
+  it("reads the month's own article when the page with every month is gone", async () => {
+    // The article at "…-mes-de-agosto-2026" holds September's table; this
+    // one has gained Monday the 21st.
+    const september = html.split('data-analytics-asset-title="')[1] as string;
+    const article = `<div data-analytics-asset-title="${september.replace(
+      '<td align="center">18</td>',
+      '<td align="center">21</td><td align="center">5.931,00</td><td align="center">5.940,00</td></tr><tr><td align="center">18</td>',
+    )}`;
+    const fetchMock = vi.fn(async (url: string) =>
+      url.endsWith('tipos-de-cambios-del-mes-de-agosto-2026')
+        ? { ok: true, status: 200, text: async () => article }
+        : { ok: false, status: 404, text: async () => 'not found' },
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    env.DNIT_RATES = 'on';
+    try {
+      await expect(officialRate('USD', day('2026-09-22'), 'venta')).resolves.toMatchObject({
+        rate: 5940,
+        date: '2026-09-21',
+      });
+      expect(fetchMock.mock.calls.map(([u]) => (u as string).split('/').pop())).toEqual([
+        'cotizaciones',
+        'tipos-de-cambios-del-mes-de-agosto-2026',
+      ]);
+    } finally {
+      env.DNIT_RATES = 'off';
+      vi.unstubAllGlobals();
+    }
   });
 
   it('does not ask a site that is down again for every invoice', async () => {
@@ -118,9 +163,10 @@ describe('the rate for an invoice', () => {
     vi.stubGlobal('fetch', fetchMock);
     env.DNIT_RATES = 'on';
     try {
-      await expect(officialRate('USD', day('2026-08-31'), 'venta')).resolves.toBe('sin-conexion');
-      await expect(officialRate('USD', day('2026-09-01'), 'venta')).resolves.toBe('sin-conexion');
-      expect(fetchMock).toHaveBeenCalledTimes(1);
+      await expect(officialRate('USD', day('2026-09-23'), 'venta')).resolves.toBe('sin-conexion');
+      const tried = fetchMock.mock.calls.length; // the page, then the month's articles
+      await expect(officialRate('USD', day('2026-09-24'), 'venta')).resolves.toBe('sin-conexion');
+      expect(fetchMock).toHaveBeenCalledTimes(tried);
     } finally {
       env.DNIT_RATES = 'off';
       vi.unstubAllGlobals();

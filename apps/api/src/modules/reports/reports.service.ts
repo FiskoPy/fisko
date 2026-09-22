@@ -3,6 +3,7 @@ import ExcelJS from 'exceljs';
 import { prisma } from '../../lib/prisma';
 import { normalizeRuc } from '../../utils/ruc';
 import { categorize, categoryLabel, type CategoryKey } from '../../services/categories';
+import { fillPendingRatesBriefly } from '../../services/pending-rates';
 
 export interface ReportPeriod {
   from?: Date;
@@ -167,6 +168,9 @@ export function documentSign(tipoDoc: number): 1 | -1 | 0 {
 }
 
 export async function getSummary(userId: string, period: ReportPeriod): Promise<FiscalSummary> {
+  // A foreign invoice waiting for the DNIT's close takes it before the month
+  // is added up, once the DNIT answers (see pending-rates).
+  await fillPendingRatesBriefly(userId);
   const user = await prisma.user.findUnique({ where: { id: userId }, select: { ruc: true } });
   const userRuc = user?.ruc ? normalizeRuc(user.ruc) : null;
 

@@ -11,6 +11,7 @@ import {
   type CategoryKey,
 } from '../../services/categories';
 import { officialRate, type OfficialRate } from '../../services/exchange-rates';
+import { fillPendingRatesBriefly } from '../../services/pending-rates';
 import { extractText, MAX_IMAGE_BYTES } from '../../services/ocr';
 import { decidePhoto, settledCurrency, type PhotoDecision } from '../../services/photo-decision';
 import {
@@ -56,10 +57,11 @@ export interface PublicInvoice {
   tipoCambio: number | null;
   /**
    * Where the rate came from when the invoice did not print one: "dnit", the
-   * close the law names, or "manual". Null: the invoice's own.
+   * close the law names, or "manual" — or "pendiente", waiting for the DNIT's
+   * close (no rate yet). Null: the invoice's own.
    */
-  tipoCambioFuente: 'dnit' | 'manual' | null;
-  /** For a DNIT rate, the day whose close it is (YYYY-MM-DD). */
+  tipoCambioFuente: 'dnit' | 'manual' | 'pendiente' | null;
+  /** For a DNIT rate, given or awaited, the day whose close it is (YYYY-MM-DD). */
   tipoCambioFecha: string | null;
   totalOpe: number;
   totalIva: number;
@@ -147,8 +149,12 @@ export function toPublicInvoice(
     // 3.420 but not what that is in guaraníes, which is the figure the month
     // is closed with.
     tipoCambio: inv.tipoCambio == null ? null : n(inv.tipoCambio),
-    tipoCambioFuente: inv.tipoCambioFuente === 'dnit' || inv.tipoCambioFuente === 'manual' ? inv.tipoCambioFuente : null,
-    tipoCambioFecha: inv.tipoCambioFuente === 'dnit' ? closeDayOf(inv.fechaEmision) : null,
+    tipoCambioFuente:
+      inv.tipoCambioFuente === 'dnit' || inv.tipoCambioFuente === 'manual' || inv.tipoCambioFuente === 'pendiente'
+        ? inv.tipoCambioFuente
+        : null,
+    tipoCambioFecha:
+      inv.tipoCambioFuente === 'dnit' || inv.tipoCambioFuente === 'pendiente' ? closeDayOf(inv.fechaEmision) : null,
     totalOpe: n(inv.totalOpe),
     totalIva: n(inv.totalIva),
     iva5: n(inv.iva5),
@@ -354,6 +360,7 @@ export interface ListInvoicesQuery {
 }
 
 export async function listInvoices(userId: string, q: ListInvoicesQuery) {
+  await fillPendingRatesBriefly(userId);
   const owner = await prisma.user.findUnique({ where: { id: userId }, select: { ruc: true } });
   const ownRuc = owner?.ruc ? normalizeRuc(owner.ruc) : null;
 
@@ -405,6 +412,7 @@ async function ownRucOf(userId: string): Promise<string | null> {
 }
 
 export async function getInvoice(userId: string, id: string): Promise<PublicInvoice> {
+  await fillPendingRatesBriefly(userId);
   const inv = (await prisma.invoice.findFirst({
     where: { id, userId },
     include: { items: true },
@@ -634,13 +642,28 @@ export async function importPhoto(userId: string, imageBase64: string) {
   let tipoCambioFuente: string | null = null;
   let tipoCambioOtroLado: number | null = null;
   if (parsed.foreignCurrency && tipoCambio == null) {
-    const side = ledgerSideOf({ emisorRuc: parsed.emisorRuc ?? '' }, ownRuc).tipo;
-    const official = await dnitRate(parsed.foreignCurrency, fechaEmision, side);
-    tipoCambio = official.rate;
-    tipoCambioOtroLado = official.other;
-    tipoCambioFuente = 'dnit';
-    const [y, m, d] = official.date.split('-');
-    missing.push(`Tipo de cambio (cotización DNIT del ${d}/${m}/${y})`);
+    const tipo = ledgerSideOf({ emisorRuc: parsed.emisorRuc ?? '' }, ownRuc).tipo;
+    const found = await officialRate(parsed.foreignCurrency, fechaEmision, tipo === 'venta' ? 'compra' : 'venta');
+    const [y, m, d] = closeDayOf(fechaEmision).split('-');
+    if (typeof found !== 'string') {
+      tipoCambio = found.rate;
+      tipoCambioOtroLado = found.other;
+      tipoCambioFuente = 'dnit';
+      missing.push(`Tipo de cambio (cotización DNIT del ${d}/${m}/${y})`);
+    } else {
+      // Its figures were read: stored, out of the guaraní totals, rather than
+      // refused for the DNIT's site — which went 404 on 2026-09-22 and turned
+      // a dollar receipt read right away twice. The rate comes in by itself
+      // once the DNIT answers (fillPendingRates), or by hand. A currency the
+      // DNIT does not quote only by hand.
+      logger.warn({ moneda: parsed.foreignCurrency, reason: found }, 'import-photo: stored without a rate');
+      tipoCambioFuente = found === 'moneda' ? null : 'pendiente';
+      missing.push(
+        found === 'moneda'
+          ? 'Tipo de cambio: cargalo a mano (la DNIT no publica esa moneda)'
+          : `Tipo de cambio pendiente: la cotización DNIT del ${d}/${m}/${y} todavía no se pudo obtener; se completa sola, o cargala a mano`,
+      );
+    }
   }
 
   if (missing.length) {

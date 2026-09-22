@@ -352,12 +352,26 @@ describe('a photo of an invoice in dollars that prints no rate', () => {
     expect(res.body.error.message).toMatch(/propio tipo de cambio/);
   });
 
-  it('waits for a business day the DNIT has not published yet', async () => {
+  it('stores a day the DNIT has not published yet, and fills its rate in once it is out', async () => {
     // Tuesday 22/09 needs Monday's close; the table stops on Friday the 18th.
+    // Its figures were read: stored out of the guaraní totals, not refused.
     photoReads(dollars('22/09/2026'));
     const res = await postPhoto();
-    expect(res.status).toBe(400);
-    expect(res.body.error.message).toMatch(/todavía no está publicada/);
-    expect(await stored()).toHaveLength(1);
+    expect(res.status).toBe(201);
+    expect(res.body.invoice).toMatchObject({
+      moneda: 'USD',
+      tipoCambio: null,
+      tipoCambioFuente: 'pendiente',
+      tipoCambioFecha: '2026-09-21',
+    });
+    expect(res.body.missing.some((m: string) => m.startsWith('Tipo de cambio pendiente'))).toBe(true);
+
+    // Monday's close comes out; the next look at the list takes it.
+    const table = parseDnitRates(readFileSync(join(__dirname, 'fixtures', 'dnit', 'cotizaciones-2026.html'), 'utf8'));
+    table.set('2026-09-21|USD', { compra: 5931, venta: 5940 });
+    resetRatesCache(table);
+    await request(app).get(`${base}/invoices`).set(auth());
+    const filled = await request(app).get(`${base}/invoices/${res.body.invoice.id}`).set(auth());
+    expect(filled.body.invoice).toMatchObject({ tipoCambio: 5940, tipoCambioFuente: 'dnit' });
   });
 });

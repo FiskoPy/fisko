@@ -95,18 +95,26 @@ class CapturaPage extends ConsumerWidget {
       // stored and flagged, not refused: everything else on it was verified.
       final revisarFecha = out.missing.any((m) => m.startsWith('Fecha ('));
       // A foreign invoice that printed no rate goes in at the DNIT's close of
-      // the day before — the law's rate, not one read off the paper.
-      final cotizacionDnit = out.missing.any((m) => m.startsWith('Tipo de cambio ('));
+      // the day before — the law's rate, not one read off the paper. When
+      // the DNIT cannot be reached it goes in all the same, out of the
+      // guaraní totals, and takes the rate once the DNIT answers.
+      final sobreCambio = out.missing.where((m) => m.startsWith('Tipo de cambio')).toList();
       final sinLeer = out.missing
-          .where((m) => !m.startsWith('Fecha (') && !m.startsWith('Tipo de cambio ('))
+          .where((m) => !m.startsWith('Fecha (') && !m.startsWith('Tipo de cambio'))
           .toList();
+      final dia = inv.tipoCambioFecha != null ? ' del ${formatIsoDay(inv.tipoCambioFecha!)}' : '';
       final notas = <String>[
         if (revisarFecha)
           'Revisá la fecha: leímos el día y el año, pero no pudimos confirmar el mes escrito a mano.',
-        if (cotizacionDnit && inv.tipoCambio != null)
-          'No traía tipo de cambio: la convertimos con la cotización de la DNIT'
-              '${inv.tipoCambioFecha != null ? ' del ${formatIsoDay(inv.tipoCambioFecha!)}' : ''} '
-              '(${formatRate(inv.tipoCambio!)}).',
+        if (sobreCambio.isNotEmpty && inv.tipoCambio != null)
+          'No traía tipo de cambio: la convertimos con la cotización de la DNIT$dia '
+              '(${formatRate(inv.tipoCambio!)}).'
+        else if (sobreCambio.isNotEmpty && inv.tipoCambioFuente == 'pendiente')
+          'No traía tipo de cambio, y la cotización de la DNIT$dia todavía no se pudo obtener: '
+              'se completa sola apenas la DNIT la publique (o cargala a mano en la factura). '
+              'Hasta entonces queda fuera de los totales en guaraníes.'
+        else if (sobreCambio.isNotEmpty)
+          'No traía tipo de cambio y la DNIT no publica esa moneda: cargalo a mano en la factura.',
         if (sinLeer.isNotEmpty)
           'No pudimos leer: ${sinLeer.join(", ")}. Revisala; si quedó mal, borrala y sacá la foto de nuevo.',
       ];
@@ -480,11 +488,17 @@ class _InvoiceTile extends StatelessWidget {
             formatMoney(invoice.totalOpe, invoice.moneda),
             style: const TextStyle(fontWeight: FontWeight.bold),
           ),
-          // A dollar invoice is closed in guaraníes: say at which rate.
+          // A dollar invoice is closed in guaraníes: say at which rate — or
+          // that it has none yet, and is out of the totals until it does.
           if (converted != null)
             Text(
               converted,
               style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.outline),
+            )
+          else if (invoice.moneda.toUpperCase() != 'PYG')
+            Text(
+              invoice.tipoCambioFuente == 'pendiente' ? 'cambio pendiente (DNIT)' : 'sin tipo de cambio',
+              style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.error),
             ),
         ],
       ),

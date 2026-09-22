@@ -219,12 +219,14 @@ class _TipoCambioRowState extends ConsumerState<_TipoCambioRow> {
     final inv = widget.invoice;
     final theme = Theme.of(context);
     final converted = formatConverted(inv.totalOpe, inv.moneda, inv.tipoCambio);
+    final dia = inv.tipoCambioFecha != null ? formatIsoDay(inv.tipoCambioFecha!) : 'día anterior';
     final source = switch (inv.tipoCambioFuente) {
       // A purchase is converted at the selling rate, a sale at the buying one.
       'dnit' => 'La factura no trae tipo de cambio: cotización DNIT '
-          '(${inv.tipo == 'venta' ? 'compra' : 'venta'}) del '
-          '${inv.tipoCambioFecha != null ? formatIsoDay(inv.tipoCambioFecha!) : 'día anterior'}.',
+          '(${inv.tipo == 'venta' ? 'compra' : 'venta'}) del $dia.',
       'manual' => 'Tipo de cambio cargado a mano.',
+      'pendiente' => 'Esperando la cotización DNIT del $dia: se completa sola apenas la DNIT la '
+          'publique. Podés cargarla a mano mientras tanto.',
       _ => null,
     };
     return Column(
