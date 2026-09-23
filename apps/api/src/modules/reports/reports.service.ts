@@ -50,7 +50,19 @@ export interface FiscalSummary {
   saldoSiguiente: number;
   /** IRE for a company, IRP for a person: an E.A.S. does not pay IRP. */
   rentaRegimen: 'IRE' | 'IRP';
+  /**
+   * 10% of what the fiscal year sold less what it bought, both WITHOUT IVA,
+   * from 1 January (or the first invoice) up to the end of the period. The
+   * IRE General is annual and on net income: 10% of one month's totals with
+   * IVA overstated it. Still an estimate — a distributor's stock bought and
+   * not yet sold is not a cost, and the app does not know the stock.
+   */
   rentaEstimado: number;
+  /** The span the estimate covers (YYYY-MM-DD), and its net sales and purchases. */
+  rentaDesde: string;
+  rentaHasta: string;
+  rentaIngresos: number;
+  rentaEgresos: number;
   /** @deprecated use rentaEstimado/rentaRegimen — kept for older app builds. */
   irpEstimado: number; // estimación simplificada
   /// Invoices left OUT of the totals: a foreign currency with no usable rate.
@@ -134,6 +146,66 @@ async function creditCarriedInto(userId: string, from: Date, userRuc: string | n
     saldo = Math.max(0, saldo + b.credito - b.debito);
   }
   return saldo;
+}
+
+/** IRE General and the IRP's top bracket: 10% of net income. */
+const RENTA_TASA = 0.1;
+
+/**
+ * The fiscal year's sales and purchases up to [until], net of IVA — the base
+ * the income tax is estimated on. The year runs January to December (the
+ * client's Constancia de RUC: "Mes de Cierre del Ejercicio 12"); a taxpayer
+ * who started mid-year simply has no invoices before.
+ */
+async function rentaDelEjercicio(
+  userId: string,
+  until: Date,
+  userRuc: string | null,
+): Promise<{ desde: string; hasta: string; ingresos: number; egresos: number }> {
+  const desde = new Date(Date.UTC(until.getUTCFullYear(), 0, 1));
+  const rows = (await prisma.invoice.findMany({
+    where: { userId, fechaEmision: { gte: desde, lte: until } },
+    select: {
+      tipoDoc: true,
+      fechaEmision: true,
+      baseGrav5: true,
+      baseGrav10: true,
+      exentas: true,
+      emisorRuc: true,
+      esVenta: true,
+      moneda: true,
+      tipoCambio: true,
+    },
+    orderBy: { fechaEmision: 'asc' },
+  })) as {
+    tipoDoc: number;
+    fechaEmision: Date;
+    baseGrav5: unknown;
+    baseGrav10: unknown;
+    exentas: unknown;
+    emisorRuc: string;
+    esVenta: boolean | null;
+    moneda: string;
+    tipoCambio: unknown;
+  }[];
+  let ingresos = 0;
+  let egresos = 0;
+  for (const r of rows) {
+    const rate = r.moneda === 'PYG' ? 1 : num(r.tipoCambio);
+    const sign = documentSign(r.tipoDoc);
+    if (!rate || sign === 0) continue;
+    const neto = (num(r.baseGrav5) + num(r.baseGrav10) + num(r.exentas)) * rate * sign;
+    const venta = r.esVenta ?? (userRuc != null && normalizeRuc(r.emisorRuc) === userRuc);
+    if (venta) ingresos += neto;
+    else egresos += neto;
+  }
+  const first = rows[0]?.fechaEmision;
+  return {
+    desde: (first ?? desde).toISOString().slice(0, 10),
+    hasta: until.toISOString().slice(0, 10),
+    ingresos: Math.round(ingresos),
+    egresos: Math.round(egresos),
+  };
 }
 
 type Row = {
@@ -288,8 +360,9 @@ export async function getSummary(userId: string, period: ReportPeriod): Promise<
     cats.set(catKey, cb);
   }
 
-  // Renta — estimativa simplificada: 10% sobre o ganho neto positivo.
-  const rentaEstimado = Math.max(0, sum.ventas - sum.compras) * 0.1;
+  // The income tax is the fiscal year's, not the period's: its own figures.
+  const renta = await rentaDelEjercicio(userId, period.to ?? new Date(), userRuc);
+  const rentaEstimado = Math.max(0, renta.ingresos - renta.egresos) * RENTA_TASA;
   const owner = await prisma.user.findUnique({
     where: { id: userId },
     select: { tipoContribuyente: true, ruc: true, name: true },
@@ -307,6 +380,10 @@ export async function getSummary(userId: string, period: ReportPeriod): Promise<
     saldoSiguiente,
     rentaRegimen,
     rentaEstimado,
+    rentaDesde: renta.desde,
+    rentaHasta: renta.hasta,
+    rentaIngresos: renta.ingresos,
+    rentaEgresos: renta.egresos,
     period: {
       from: period.from ? period.from.toISOString() : null,
       to: period.to ? period.to.toISOString() : null,
@@ -460,10 +537,20 @@ export async function buildPdf(summary: FiscalSummary, detail?: ReportDetail): P
   doc.moveDown(0.3);
   line('Ventas (ingresos)', fmtGs(summary.ventas));
   line('Compras (gastos)', fmtGs(summary.compras));
-  line(
-    `${summary.rentaRegimen} estimado (simplificado)`,
-    fmtGs(summary.rentaEstimado),
-    true,
+  doc.moveDown(0.4);
+  // The income tax is annual: its own span, and its own net-of-IVA figures.
+  const dmy = (ymd: string) => ymd.split('-').reverse().join('/');
+  doc.fontSize(13).fillColor('#14508F').text(`${summary.rentaRegimen} estimado del ejercicio`);
+  doc.moveDown(0.3);
+  line(`Ventas sin IVA (${dmy(summary.rentaDesde)} a ${dmy(summary.rentaHasta)})`, fmtGs(summary.rentaIngresos));
+  line('Compras y gastos sin IVA', fmtGs(summary.rentaEgresos));
+  line(`${summary.rentaRegimen} estimado (10% de la diferencia)`, fmtGs(summary.rentaEstimado), true);
+  doc.fontSize(8).fillColor('#777').text(
+    'Estimación para acompañar el año: toda compra se cuenta como gasto, y la mercadería en ' +
+      'stock no vendida no es costo. El impuesto definitivo es el que resulta del balance.',
+    48,
+    doc.y,
+    { width: doc.page.width - 96 },
   );
   doc.moveDown(0.6);
 
@@ -582,7 +669,7 @@ export async function buildExcel(summary: FiscalSummary): Promise<Buffer> {
   add('Compras (gastos)', summary.compras);
   add('IVA crédito', summary.ivaCredito);
   add('IVA débito', summary.ivaDebito);
-  add('IRP estimado', summary.irpEstimado);
+  add(`${summary.rentaRegimen} estimado del ejercicio (sin IVA, desde ${summary.rentaDesde})`, summary.rentaEstimado);
   ws.getRow(1).font = { bold: true };
 
   const wm = wb.addWorksheet('Por mes');

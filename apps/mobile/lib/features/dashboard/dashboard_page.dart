@@ -88,7 +88,7 @@ class _Dashboard extends StatelessWidget {
             _StatCard(
               // A company files IRE, a person IRP: the client's E.A.S. was
               // being offered an IRP figure it does not pay.
-              label: '${s.rentaRegimen} estimado',
+              label: '${s.rentaRegimen} estimado del año',
               value: formatGs(s.rentaEstimado),
               icon: Icons.account_balance,
             ),
@@ -133,7 +133,9 @@ class _Dashboard extends StatelessWidget {
         ],
         const SizedBox(height: 20),
         Text(
-          'El ${s.rentaRegimen} se estima de forma simplificada. No constituye asesoría fiscal.',
+          'El ${s.rentaRegimen} se estima sobre el año en curso, sin IVA: 10% de las ventas menos '
+          'las compras. Toda compra cuenta como gasto, aunque la mercadería siga en stock, así que '
+          'el impuesto definitivo es el del balance. No constituye asesoría fiscal.',
           style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.outline),
         ),
       ],

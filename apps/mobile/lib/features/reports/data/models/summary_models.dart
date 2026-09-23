@@ -50,6 +50,12 @@ class FiscalSummary with _$FiscalSummary {
     // IRE for a company, IRP for a person.
     @Default('IRP') String rentaRegimen,
     @Default(0) double rentaEstimado,
+    // The fiscal year the estimate covers (YYYY-MM-DD), and its sales and
+    // purchases without IVA. Null from an API older than 2026-09-23.
+    String? rentaDesde,
+    String? rentaHasta,
+    @Default(0) double rentaIngresos,
+    @Default(0) double rentaEgresos,
     @Default(0) int documentos,
     @Default(0) int sinOperacion,
     @Default(0) double exentas,

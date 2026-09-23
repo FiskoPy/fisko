@@ -172,8 +172,16 @@ class _MonthTotals extends ConsumerWidget {
                   bold: true,
                 ),
                 const SizedBox(height: 6),
-                Text('${s.rentaRegimen} estimado ${formatGs(s.rentaEstimado)}',
-                    style: TextStyle(color: scheme.outline)),
+                // The income tax is annual: the year so far, without IVA.
+                Text(
+                  s.rentaDesde != null && s.rentaHasta != null
+                      ? '${s.rentaRegimen} estimado del ejercicio ${formatGs(s.rentaEstimado)} '
+                          '(10% de ventas ${formatGs(s.rentaIngresos)} menos compras '
+                          '${formatGs(s.rentaEgresos)}, sin IVA, del ${formatIsoDay(s.rentaDesde!)} '
+                          'al ${formatIsoDay(s.rentaHasta!)})'
+                      : '${s.rentaRegimen} estimado ${formatGs(s.rentaEstimado)}',
+                  style: TextStyle(color: scheme.outline),
+                ),
                 if (s.sinConversion > 0)
                   Padding(
                     padding: const EdgeInsets.only(top: 6),
